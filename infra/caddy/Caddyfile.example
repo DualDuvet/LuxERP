@@ -1,0 +1,25 @@
+{
+  # Optional, but useful for Let's Encrypt notifications.
+  email admin@luxerp.ru
+}
+
+www.luxerp.ru {
+  redir https://luxerp.ru{uri} permanent
+}
+
+luxerp.ru {
+  encode zstd gzip
+
+  reverse_proxy 10.77.0.2:3000 {
+    header_up X-Forwarded-Host {host}
+    header_up X-Forwarded-Proto {scheme}
+    header_up X-Forwarded-For {remote_host}
+  }
+
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+    X-Content-Type-Options "nosniff"
+    X-Frame-Options "SAMEORIGIN"
+    Referrer-Policy "strict-origin-when-cross-origin"
+  }
+}
