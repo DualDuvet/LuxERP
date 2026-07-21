@@ -1,93 +1,62 @@
 import "server-only";
 
-import { createHmac, pbkdf2Sync, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import path from "node:path";
-import { cookies } from "next/headers";
+import { hashPassword } from "better-auth/crypto";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { getAuthSecret, getBootstrapPin, validateSecurityEnv } from "@/lib/security-env";
+import { randomUUID } from "node:crypto";
+import { authPrisma } from "@/lib/auth-prisma";
+import { auth } from "@/lib/better-auth";
+import { isValidControlPhrase, normalizeControlPhrase } from "@/lib/auth-phrase";
+import { getRoleLabel, userRoles } from "@/lib/roles";
+import { getBootstrapPhrase, getBootstrapUsername } from "@/lib/security-env";
 import type { UserRole } from "@/lib/types";
 
-export const sessionCookieName = "luxerp_session";
-
-export const userRoles = ["admin", "manager", "production", "accountant", "viewer"] as const;
+export { getRoleLabel, userRoles };
 
 export type CurrentUser = {
   id: string;
+  username: string;
   email: string;
   name: string;
   role: UserRole;
-};
-
-type StoredUser = CurrentUser & {
-  passwordHash: string;
-  isActive: boolean;
 };
 
 export type ManagedUser = CurrentUser & {
   isActive: boolean;
 };
 
-const dataDir = path.join(process.cwd(), ".data");
-const usersFile = path.join(dataDir, "users.json");
-const sessionMaxAgeSeconds = 60 * 60 * 12;
-
-const roleLabels: Record<UserRole, string> = {
-  admin: "Администратор",
-  manager: "Менеджер",
-  production: "Производство",
-  accountant: "Бухгалтер",
-  viewer: "Просмотр"
-};
-
-function secret() {
-  return getAuthSecret();
+function isUserRole(value: string): value is UserRole {
+  return userRoles.includes(value as UserRole);
 }
 
-function encodeBase64Url(value: string) {
-  return Buffer.from(value, "utf8").toString("base64url");
+function normalizeUsername(value: string) {
+  return value.trim().toLowerCase();
 }
 
-function decodeBase64Url(value: string) {
-  return Buffer.from(value, "base64url").toString("utf8");
+function isValidUsername(value: string) {
+  return /^[a-z0-9][a-z0-9._-]{2,29}$/i.test(value);
 }
 
-function sign(value: string) {
-  return createHmac("sha256", secret()).update(value).digest("base64url");
+function localAuthEmail(username: string) {
+  return `${username}@local.luxerp`;
 }
 
-function safeEqual(first: string, second: string) {
-  const firstBuffer = Buffer.from(first);
-  const secondBuffer = Buffer.from(second);
-
-  return firstBuffer.length === secondBuffer.length && timingSafeEqual(firstBuffer, secondBuffer);
-}
-
-function hashSecret(secretValue: string, salt = randomBytes(16).toString("base64url")) {
-  const hash = pbkdf2Sync(secretValue, salt, 120000, 32, "sha256").toString("base64url");
-  return `pbkdf2$${salt}$${hash}`;
-}
-
-function verifySecret(secretValue: string, passwordHash: string) {
-  const [method, salt, expectedHash] = passwordHash.split("$");
-
-  if (method !== "pbkdf2" || !salt || !expectedHash) {
-    return false;
+function toManagedUser(user: {
+  id: string;
+  username: string | null;
+  email: string;
+  name: string;
+  role: string;
+  isActive: boolean;
+}): ManagedUser {
+  if (!isUserRole(user.role)) {
+    throw new Error("Invalid user role.");
   }
 
-  const actualHash = hashSecret(secretValue, salt).split("$")[2];
-  return safeEqual(actualHash, expectedHash);
-}
-
-function isSixDigitPin(value: string) {
-  return /^\d{6}$/.test(value);
-}
-
-function toManagedUser(user: StoredUser): ManagedUser {
   return {
     id: user.id,
+    username: user.username ?? "",
     email: user.email,
     name: user.name,
     role: user.role,
@@ -95,314 +64,259 @@ function toManagedUser(user: StoredUser): ManagedUser {
   };
 }
 
-function normalizeEmail(value: string | undefined, id: string) {
-  const email = value?.trim().toLowerCase();
-  return email || `${id}@pin.local`;
-}
+let bootstrapPromise: Promise<void> | undefined;
 
-async function canUsePrismaUsers() {
-  if (process.env.ORDER_STORE === "file" || !process.env.DATABASE_URL) {
-    return false;
-  }
+async function ensureBootstrapUser() {
+  if (!bootstrapPromise) {
+    bootstrapPromise = (async () => {
+      const username = getBootstrapUsername();
+      const existing = await authPrisma.user.findUnique({
+        where: { username },
+        select: { id: true, username: true, email: true, name: true, role: true, isActive: true }
+      });
 
-  try {
-    await prisma.$queryRaw`SELECT 1`;
-    return true;
-  } catch {
-    return false;
-  }
-}
+      if (existing) {
+        const account = await authPrisma.account.findFirst({
+          where: { userId: existing.id, providerId: "credential" },
+          select: { id: true }
+        });
 
-async function readFileUsers() {
-  try {
-    const content = await readFile(usersFile, "utf8");
-    return JSON.parse(content) as StoredUser[];
-  } catch {
-    return [];
-  }
-}
+        if (!account) {
+          await authPrisma.account.create({
+            data: {
+              id: `account-${randomUUID()}`,
+              accountId: existing.id,
+              providerId: "credential",
+              userId: existing.id,
+              password: await hashPassword(normalizeControlPhrase(getBootstrapPhrase()))
+            }
+          });
+        }
 
-async function writeFileUsers(users: StoredUser[]) {
-  await mkdir(dataDir, { recursive: true });
-  await writeFile(usersFile, JSON.stringify(users, null, 2), "utf8");
-}
-
-async function listUsers() {
-  if (await canUsePrismaUsers()) {
-    const users = await prisma.user.findMany();
-    return users.map<StoredUser>((user) => ({
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      passwordHash: user.passwordHash,
-      role: user.role as UserRole,
-      isActive: user.isActive
-    }));
-  }
-
-  return readFileUsers();
-}
-
-async function createUser(user: StoredUser) {
-  if (await canUsePrismaUsers()) {
-    await prisma.user.create({
-      data: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        passwordHash: user.passwordHash,
-        role: user.role,
-        isActive: user.isActive
+        return;
       }
+
+      await createManagedUser({
+        username,
+        name: process.env.AUTH_BOOTSTRAP_NAME?.trim() || "Администратор",
+        role: "admin",
+        phrase: getBootstrapPhrase()
+      });
+    })().catch((error) => {
+      bootstrapPromise = undefined;
+      throw error;
     });
-    return;
   }
 
-  const users = await readFileUsers();
-  await writeFileUsers([...users, user]);
+  await bootstrapPromise;
 }
 
-async function updateStoredUser(user: StoredUser) {
-  if (await canUsePrismaUsers()) {
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        email: user.email,
-        name: user.name,
-        passwordHash: user.passwordHash,
-        role: user.role,
-        isActive: user.isActive
-      }
-    });
-    return;
-  }
-
-  const users = await readFileUsers();
-  await writeFileUsers(users.map((item) => (item.id === user.id ? user : item)));
-}
-
-async function getActiveUserById(id: string | undefined) {
-  if (!id) {
-    return null;
-  }
-
+export async function getCurrentUser(): Promise<CurrentUser | null> {
   await ensureBootstrapUser();
+  const session = await auth.api.getSession({
+    headers: await headers()
+  });
 
-  const user = (await listUsers()).find((item) => item.id === id);
-
-  if (!user?.isActive) {
+  if (!session?.user?.id) {
     return null;
   }
 
-  return {
-    id: user.id,
-    email: user.email,
-    name: user.name,
-    role: user.role
-  } satisfies CurrentUser;
-}
+  const user = await authPrisma.user.findUnique({
+    where: { id: session.user.id },
+    select: {
+      id: true,
+      username: true,
+      email: true,
+      name: true,
+      role: true,
+      isActive: true
+    }
+  });
 
-export function getRoleLabel(role: UserRole) {
-  return roleLabels[role];
-}
-
-export function canManageOrders(role: UserRole) {
-  return role === "admin" || role === "manager";
-}
-
-export function canManagePayments(role: UserRole) {
-  return role === "admin" || role === "accountant";
-}
-
-export function canManageProduction(role: UserRole) {
-  return role === "admin" || role === "production";
-}
-
-export function hasAnyRole(user: CurrentUser | null, roles: UserRole[]) {
-  return Boolean(user && roles.includes(user.role));
-}
-
-async function assertPinAvailable(pin: string, exceptUserId?: string) {
-  if (!isSixDigitPin(pin)) {
-    throw new Error("PIN must contain exactly 6 digits");
+  if (!user || !user.isActive || !isUserRole(user.role)) {
+    return null;
   }
 
-  const users = await listUsers();
-  const duplicate = users.find((user) => user.id !== exceptUserId && verifySecret(pin, user.passwordHash));
-
-  if (duplicate) {
-    throw new Error("PIN is already used");
-  }
+  return toManagedUser(user);
 }
 
 export async function listManagedUsers() {
-  await ensureBootstrapUser();
-  const users = await listUsers();
-  return users.map(toManagedUser).sort((first, second) => first.name.localeCompare(second.name));
+  const users = await authPrisma.user.findMany({
+    orderBy: { name: "asc" },
+    select: {
+      id: true,
+      username: true,
+      email: true,
+      name: true,
+      role: true,
+      isActive: true
+    }
+  });
+
+  return users.flatMap((user) => (isUserRole(user.role) ? [toManagedUser(user)] : []));
 }
 
 export async function createManagedUser(input: {
+  username: string;
   name: string;
-  email?: string;
   role: UserRole;
-  pin: string;
+  phrase: string;
 }) {
-  await ensureBootstrapUser();
-  await assertPinAvailable(input.pin);
+  const username = normalizeUsername(input.username);
+  const phrase = normalizeControlPhrase(input.phrase);
 
-  const id = `user-${randomUUID()}`;
-  const user: StoredUser = {
-    id,
-    email: normalizeEmail(input.email, id),
-    name: input.name.trim(),
-    passwordHash: hashSecret(input.pin),
-    role: input.role,
-    isActive: true
-  };
+  if (!isValidUsername(username)) {
+    throw new Error("Login must contain 3-30 Latin letters, digits, dots, underscores or hyphens.");
+  }
 
-  await createUser(user);
+  if (!isValidControlPhrase(phrase)) {
+    throw new Error("Control phrase must contain exactly three words.");
+  }
+
+  if (!isUserRole(input.role)) {
+    throw new Error("Invalid user role.");
+  }
+
+  const email = localAuthEmail(username);
+  const existing = await authPrisma.user.findFirst({
+    where: {
+      OR: [{ username }, { email }]
+    },
+    select: { id: true }
+  });
+
+  if (existing) {
+    throw new Error("This login is already in use.");
+  }
+
+  const password = await hashPassword(phrase);
+  const user = await authPrisma.$transaction(async (transaction) => {
+    const createdUser = await transaction.user.create({
+      data: {
+        id: `user-${randomUUID()}`,
+        username,
+        displayUsername: username,
+        email,
+        name: input.name.trim(),
+        emailVerified: false,
+        role: input.role,
+        isActive: true
+      }
+    });
+
+    await transaction.account.create({
+      data: {
+        id: `account-${randomUUID()}`,
+        accountId: createdUser.id,
+        providerId: "credential",
+        userId: createdUser.id,
+        password
+      }
+    });
+
+    return createdUser;
+  });
+
   return toManagedUser(user);
 }
 
 export async function updateManagedUser(
   id: string,
   input: {
+    username?: string;
     name?: string;
-    email?: string;
     role?: UserRole;
     isActive?: boolean;
-    pin?: string;
+    phrase?: string;
   }
 ) {
-  await ensureBootstrapUser();
+  const current = await authPrisma.user.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      username: true,
+      email: true,
+      name: true,
+      role: true,
+      isActive: true
+    }
+  });
 
-  const user = (await listUsers()).find((item) => item.id === id);
-
-  if (!user) {
+  if (!current) {
     return null;
   }
 
-  const nextUser: StoredUser = {
-    ...user,
-    name: input.name?.trim() || user.name,
-    email: input.email === undefined ? user.email : normalizeEmail(input.email, user.id),
-    role: input.role ?? user.role,
-    isActive: input.isActive ?? user.isActive
-  };
+  const username = input.username === undefined ? undefined : normalizeUsername(input.username);
+  const phrase = input.phrase ? normalizeControlPhrase(input.phrase) : undefined;
 
-  if (input.pin) {
-    await assertPinAvailable(input.pin, user.id);
-    nextUser.passwordHash = hashSecret(input.pin);
+  if (username !== undefined && !isValidUsername(username)) {
+    throw new Error("Login must contain 3-30 Latin letters, digits, dots, underscores or hyphens.");
   }
 
-  await updateStoredUser(nextUser);
-  return toManagedUser(nextUser);
-}
+  if (phrase !== undefined && !isValidControlPhrase(phrase)) {
+    throw new Error("Control phrase must contain exactly three words.");
+  }
 
-export async function ensureBootstrapUser() {
-  validateSecurityEnv();
-  const users = await listUsers();
-  const bootstrapPin = getBootstrapPin();
+  if (input.role !== undefined && !isUserRole(input.role)) {
+    throw new Error("Invalid user role.");
+  }
 
-  if (users.length > 0) {
-    const bootstrapUser = users.find((user) => user.id === "user-admin");
+  if (username && username !== current.username) {
+    const duplicate = await authPrisma.user.findUnique({
+      where: { username },
+      select: { id: true }
+    });
 
-    if (bootstrapUser) {
-      const nextBootstrapUser = {
-        ...bootstrapUser,
-        name: process.env.AUTH_BOOTSTRAP_NAME ?? "Администратор",
-        passwordHash: (verifySecret("admin123", bootstrapUser.passwordHash) ||
-          verifySecret("123456", bootstrapUser.passwordHash))
-          ? hashSecret(bootstrapPin)
-          : bootstrapUser.passwordHash
-      };
+    if (duplicate && duplicate.id !== id) {
+      throw new Error("This login is already in use.");
+    }
+  }
 
-      if (nextBootstrapUser.name !== bootstrapUser.name || nextBootstrapUser.passwordHash !== bootstrapUser.passwordHash) {
-        await updateStoredUser(nextBootstrapUser);
+  const password = phrase ? await hashPassword(phrase) : undefined;
+  const user = await authPrisma.$transaction(async (transaction) => {
+    const updatedUser = await transaction.user.update({
+      where: { id },
+      data: {
+        username,
+        displayUsername: username,
+        name: input.name?.trim(),
+        role: input.role,
+        isActive: input.isActive
+      }
+    });
+
+    if (password) {
+      const credentialAccount = await transaction.account.findFirst({
+        where: { userId: id, providerId: "credential" },
+        select: { id: true }
+      });
+
+      if (credentialAccount) {
+        await transaction.account.update({
+          where: { id: credentialAccount.id },
+          data: { password }
+        });
+      } else {
+        await transaction.account.create({
+          data: {
+            id: `account-${randomUUID()}`,
+            accountId: id,
+            providerId: "credential",
+            userId: id,
+            password
+          }
+        });
       }
     }
 
-    return;
-  }
+    if (password || input.isActive === false) {
+      await transaction.session.deleteMany({ where: { userId: id } });
+    }
 
-  await createUser({
-    id: "user-admin",
-    email: process.env.AUTH_BOOTSTRAP_EMAIL ?? "admin@luxerp.local",
-    name: process.env.AUTH_BOOTSTRAP_NAME ?? "Администратор",
-    passwordHash: hashSecret(bootstrapPin),
-    role: "admin",
-    isActive: true
+    return updatedUser;
   });
-}
 
-export async function authenticateByPin(pin: string) {
-  validateSecurityEnv();
-  await ensureBootstrapUser();
-
-  if (!isSixDigitPin(pin)) {
-    return null;
-  }
-
-  const user = (await listUsers()).find((item) => item.isActive && verifySecret(pin, item.passwordHash));
-
-  if (!user) {
-    return null;
-  }
-
-  return {
-    id: user.id,
-    email: user.email,
-    name: user.name,
-    role: user.role
-  } satisfies CurrentUser;
-}
-
-export function createSessionToken(user: CurrentUser) {
-  const payload = encodeBase64Url(
-    JSON.stringify({
-      user,
-      expiresAt: Date.now() + sessionMaxAgeSeconds * 1000
-    })
-  );
-
-  return `${payload}.${sign(payload)}`;
-}
-
-export function readSessionToken(token: string | undefined) {
-  if (!token) {
-    return null;
-  }
-
-  const [payload, signature] = token.split(".");
-
-  if (!payload || !signature || !safeEqual(signature, sign(payload))) {
-    return null;
-  }
-
-  try {
-    const session = JSON.parse(decodeBase64Url(payload)) as {
-      user?: CurrentUser;
-      expiresAt?: number;
-    };
-
-    if (!session.user || !session.expiresAt || session.expiresAt < Date.now()) {
-      return null;
-    }
-
-    if (!userRoles.includes(session.user.role)) {
-      return null;
-    }
-
-    return session.user;
-  } catch {
-    return null;
-  }
-}
-
-export async function getCurrentUser() {
-  const cookieStore = await cookies();
-  const sessionUser = readSessionToken(cookieStore.get(sessionCookieName)?.value);
-  return getActiveUserById(sessionUser?.id);
+  return toManagedUser(user);
 }
 
 export async function requireUser() {
@@ -429,7 +343,10 @@ export async function requireApiUser() {
   const user = await getCurrentUser();
 
   if (!user) {
-    return { user: null, response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
+    return {
+      user: null,
+      response: NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    };
   }
 
   return { user, response: null };
@@ -443,43 +360,23 @@ export async function requireApiRole(roles: UserRole[]) {
   }
 
   if (!roles.includes(user.role)) {
-    return { user: null, response: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
+    return {
+      user: null,
+      response: NextResponse.json({ error: "Forbidden" }, { status: 403 })
+    };
   }
 
   return { user, response: null };
 }
 
-function firstHeaderValue(value: string | null) {
-  return value?.split(",")[0]?.trim() || null;
+export function canManageOrders(role: UserRole) {
+  return role === "admin" || role === "manager";
 }
 
-function shouldUseSecureCookie(request?: Request) {
-  if (!request) {
-    return process.env.NODE_ENV === "production";
-  }
-
-  const forwardedProtocol = firstHeaderValue(request.headers.get("x-forwarded-proto"));
-  const requestProtocol = new URL(request.url).protocol.replace(":", "");
-
-  return (forwardedProtocol ?? requestProtocol) === "https";
+export function canManagePayments(role: UserRole) {
+  return role === "admin" || role === "accountant";
 }
 
-export function setSessionCookie(response: NextResponse, user: CurrentUser, request?: Request) {
-  response.cookies.set(sessionCookieName, createSessionToken(user), {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: shouldUseSecureCookie(request),
-    path: "/",
-    maxAge: sessionMaxAgeSeconds
-  });
-}
-
-export function clearSessionCookie(response: NextResponse) {
-  response.cookies.set(sessionCookieName, "", {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: 0
-  });
+export function canManageProduction(role: UserRole) {
+  return role === "admin" || role === "production";
 }

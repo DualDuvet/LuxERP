@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { getStorageMode } from "@/lib/storage-mode";
 import type {
   DictionaryItem,
   Order,
@@ -39,7 +40,9 @@ function toDateString(value: Date | null | undefined) {
   return value ? value.toISOString().slice(0, 10) : undefined;
 }
 
-function dictionaryItem(value: { id: string; name: string; isActive: boolean } | null): DictionaryItem | undefined {
+function dictionaryItem(
+  value: { id: string; name: string; isActive: boolean } | null
+): DictionaryItem | undefined {
   if (!value) {
     return undefined;
   }
@@ -117,7 +120,8 @@ function fromPrismaOrder(order: PrismaOrder): Order {
       paymentType: payment.paymentType as PaymentType,
       amount: Number(payment.amount),
       paymentDate: toDateString(payment.paymentDate) ?? "",
-      paymentMethod: (payment.paymentMethod as PaymentMethod | null) ?? undefined,
+      paymentMethod:
+        (payment.paymentMethod as PaymentMethod | null) ?? undefined,
       comment: payment.comment ?? undefined
     })),
     statusHistory: order.statusHistory.map((item) => ({
@@ -134,6 +138,7 @@ function fromPrismaOrder(order: PrismaOrder): Order {
 }
 
 async function upsertDictionaryItem(
+  client: Prisma.TransactionClient,
   type: "category" | "materialType" | "millingType",
   item: DictionaryItem | undefined
 ) {
@@ -142,17 +147,19 @@ async function upsertDictionaryItem(
   }
 
   if (type === "category") {
-    const existing = await prisma.productCategory.findUnique({ where: { name: item.name } });
+    const existing = await client.productCategory.findUnique({
+      where: { name: item.name }
+    });
 
     if (existing) {
-      await prisma.productCategory.update({
+      await client.productCategory.update({
         where: { id: existing.id },
         data: { isActive: item.isActive }
       });
       return existing.id;
     }
 
-    await prisma.productCategory.upsert({
+    await client.productCategory.upsert({
       where: { id: item.id },
       update: { name: item.name, isActive: item.isActive },
       create: { id: item.id, name: item.name, isActive: item.isActive }
@@ -160,17 +167,19 @@ async function upsertDictionaryItem(
   }
 
   if (type === "materialType") {
-    const existing = await prisma.materialType.findUnique({ where: { name: item.name } });
+    const existing = await client.materialType.findUnique({
+      where: { name: item.name }
+    });
 
     if (existing) {
-      await prisma.materialType.update({
+      await client.materialType.update({
         where: { id: existing.id },
         data: { isActive: item.isActive }
       });
       return existing.id;
     }
 
-    await prisma.materialType.upsert({
+    await client.materialType.upsert({
       where: { id: item.id },
       update: { name: item.name, isActive: item.isActive },
       create: { id: item.id, name: item.name, isActive: item.isActive }
@@ -178,17 +187,19 @@ async function upsertDictionaryItem(
   }
 
   if (type === "millingType") {
-    const existing = await prisma.millingType.findUnique({ where: { name: item.name } });
+    const existing = await client.millingType.findUnique({
+      where: { name: item.name }
+    });
 
     if (existing) {
-      await prisma.millingType.update({
+      await client.millingType.update({
         where: { id: existing.id },
         data: { isActive: item.isActive }
       });
       return existing.id;
     }
 
-    await prisma.millingType.upsert({
+    await client.millingType.upsert({
       where: { id: item.id },
       update: { name: item.name, isActive: item.isActive },
       create: { id: item.id, name: item.name, isActive: item.isActive }
@@ -199,20 +210,16 @@ async function upsertDictionaryItem(
 }
 
 export async function canUsePrismaOrderStore() {
-  if (process.env.ORDER_STORE === "file") {
+  if (getStorageMode() === "file") {
     return false;
   }
 
   if (!process.env.DATABASE_URL) {
-    return false;
+    throw new Error("DATABASE_URL is required when ORDER_STORE=prisma");
   }
 
-  try {
-    await prisma.$queryRaw`SELECT 1`;
-    return true;
-  } catch {
-    return false;
-  }
+  await prisma.$queryRaw`SELECT 1`;
+  return true;
 }
 
 export async function listPrismaOrders() {
@@ -250,149 +257,169 @@ export async function getPrismaOrderById(id: string) {
 }
 
 export async function savePrismaOrder(order: Order) {
-  const categoryId = await upsertDictionaryItem("category", order.category);
-  const materialTypeId = await upsertDictionaryItem("materialType", order.materialType);
-  const millingTypeId = await upsertDictionaryItem("millingType", order.millingType);
+  return prisma.$transaction(async (transaction) => {
+    const categoryId = await upsertDictionaryItem(
+      transaction,
+      "category",
+      order.category
+    );
+    const materialTypeId = await upsertDictionaryItem(
+      transaction,
+      "materialType",
+      order.materialType
+    );
+    const millingTypeId = await upsertDictionaryItem(
+      transaction,
+      "millingType",
+      order.millingType
+    );
 
-  await prisma.customer.upsert({
-    where: { id: order.customer.id },
-    update: {
-      name: order.customer.name,
-      legalType: order.customer.legalType,
-      phone: order.customer.phone,
-      email: order.customer.email,
-      inn: order.customer.inn,
-      address: order.customer.address,
-      comment: order.customer.comment,
-      isActive: order.customer.isActive
-    },
-    create: {
-      id: order.customer.id,
-      name: order.customer.name,
-      legalType: order.customer.legalType,
-      phone: order.customer.phone,
-      email: order.customer.email,
-      inn: order.customer.inn,
-      address: order.customer.address,
-      comment: order.customer.comment,
-      isActive: order.customer.isActive
+    await transaction.customer.upsert({
+      where: { id: order.customer.id },
+      update: {
+        name: order.customer.name,
+        legalType: order.customer.legalType,
+        phone: order.customer.phone,
+        email: order.customer.email,
+        inn: order.customer.inn,
+        address: order.customer.address,
+        comment: order.customer.comment,
+        isActive: order.customer.isActive
+      },
+      create: {
+        id: order.customer.id,
+        name: order.customer.name,
+        legalType: order.customer.legalType,
+        phone: order.customer.phone,
+        email: order.customer.email,
+        inn: order.customer.inn,
+        address: order.customer.address,
+        comment: order.customer.comment,
+        isActive: order.customer.isActive
+      }
+    });
+
+    await transaction.order.upsert({
+      where: { id: order.id },
+      update: {
+        specificationNumber: order.specificationNumber,
+        documentDate: toDate(order.documentDate) ?? new Date(),
+        customerId: order.customer.id,
+        customerLegalType: order.customerLegalType,
+        status: order.status,
+        productionStartedAt: toDate(order.productionStartedAt),
+        readyAt: toDate(order.readyAt),
+        shippedAt: toDate(order.shippedAt),
+        categoryId,
+        materialTypeId,
+        thicknessMm: order.thicknessMm,
+        millingTypeId,
+        colorCode: order.colorCode,
+        mainNote: order.mainNote,
+        jointingNote: order.jointingNote,
+        deliveryRequired: order.deliveryRequired,
+        deliveryAddress: order.deliveryAddress,
+        totalAreaM2: order.totalAreaM2,
+        subtotalAmount: order.subtotalAmount,
+        discountAmount: order.discountAmount,
+        surchargeAmount: order.surchargeAmount,
+        prepaymentAmount: order.prepaymentAmount,
+        balanceAmount: order.balanceAmount,
+        totalAmount: order.totalAmount
+      },
+      create: {
+        id: order.id,
+        specificationNumber: order.specificationNumber,
+        documentDate: toDate(order.documentDate) ?? new Date(),
+        customerId: order.customer.id,
+        customerLegalType: order.customerLegalType,
+        status: order.status,
+        productionStartedAt: toDate(order.productionStartedAt),
+        readyAt: toDate(order.readyAt),
+        shippedAt: toDate(order.shippedAt),
+        categoryId,
+        materialTypeId,
+        thicknessMm: order.thicknessMm,
+        millingTypeId,
+        colorCode: order.colorCode,
+        mainNote: order.mainNote,
+        jointingNote: order.jointingNote,
+        deliveryRequired: order.deliveryRequired,
+        deliveryAddress: order.deliveryAddress,
+        totalAreaM2: order.totalAreaM2,
+        subtotalAmount: order.subtotalAmount,
+        discountAmount: order.discountAmount,
+        surchargeAmount: order.surchargeAmount,
+        prepaymentAmount: order.prepaymentAmount,
+        balanceAmount: order.balanceAmount,
+        totalAmount: order.totalAmount
+      }
+    });
+
+    await transaction.specificationLine.deleteMany({
+      where: { orderId: order.id }
+    });
+    await transaction.payment.deleteMany({ where: { orderId: order.id } });
+    await transaction.orderStatusHistory.deleteMany({
+      where: { orderId: order.id }
+    });
+
+    if (order.lines.length > 0) {
+      await transaction.specificationLine.createMany({
+        data: order.lines.map((line) => ({
+          id: line.id,
+          orderId: order.id,
+          parentId: line.parentId,
+          lineType: line.lineType,
+          sortOrder: line.sortOrder,
+          title: line.title,
+          description: line.description,
+          heightMm: line.heightMm,
+          widthMm: line.widthMm,
+          quantity: line.quantity,
+          unit: line.unit,
+          pricePerM2: line.pricePerM2,
+          unitAreaM2: line.unitAreaM2,
+          totalAreaM2: line.totalAreaM2,
+          unitPrice: line.unitPrice,
+          totalPrice: line.totalPrice,
+          isCalculated: line.isCalculated,
+          isPrinted: line.isPrinted,
+          metadata:
+            line.metadata == null
+              ? Prisma.JsonNull
+              : (line.metadata as Prisma.InputJsonValue)
+        }))
+      });
     }
-  });
 
-  await prisma.order.upsert({
-    where: { id: order.id },
-    update: {
-      specificationNumber: order.specificationNumber,
-      documentDate: toDate(order.documentDate) ?? new Date(),
-      customerId: order.customer.id,
-      customerLegalType: order.customerLegalType,
-      status: order.status,
-      productionStartedAt: toDate(order.productionStartedAt),
-      readyAt: toDate(order.readyAt),
-      shippedAt: toDate(order.shippedAt),
-      categoryId,
-      materialTypeId,
-      thicknessMm: order.thicknessMm,
-      millingTypeId,
-      colorCode: order.colorCode,
-      mainNote: order.mainNote,
-      jointingNote: order.jointingNote,
-      deliveryRequired: order.deliveryRequired,
-      deliveryAddress: order.deliveryAddress,
-      totalAreaM2: order.totalAreaM2,
-      subtotalAmount: order.subtotalAmount,
-      discountAmount: order.discountAmount,
-      surchargeAmount: order.surchargeAmount,
-      prepaymentAmount: order.prepaymentAmount,
-      balanceAmount: order.balanceAmount,
-      totalAmount: order.totalAmount
-    },
-    create: {
-      id: order.id,
-      specificationNumber: order.specificationNumber,
-      documentDate: toDate(order.documentDate) ?? new Date(),
-      customerId: order.customer.id,
-      customerLegalType: order.customerLegalType,
-      status: order.status,
-      productionStartedAt: toDate(order.productionStartedAt),
-      readyAt: toDate(order.readyAt),
-      shippedAt: toDate(order.shippedAt),
-      categoryId,
-      materialTypeId,
-      thicknessMm: order.thicknessMm,
-      millingTypeId,
-      colorCode: order.colorCode,
-      mainNote: order.mainNote,
-      jointingNote: order.jointingNote,
-      deliveryRequired: order.deliveryRequired,
-      deliveryAddress: order.deliveryAddress,
-      totalAreaM2: order.totalAreaM2,
-      subtotalAmount: order.subtotalAmount,
-      discountAmount: order.discountAmount,
-      surchargeAmount: order.surchargeAmount,
-      prepaymentAmount: order.prepaymentAmount,
-      balanceAmount: order.balanceAmount,
-      totalAmount: order.totalAmount
+    if (order.payments.length > 0) {
+      await transaction.payment.createMany({
+        data: order.payments.map((payment) => ({
+          id: payment.id,
+          orderId: order.id,
+          paymentType: payment.paymentType,
+          amount: payment.amount,
+          paymentDate: toDate(payment.paymentDate) ?? new Date(),
+          paymentMethod: payment.paymentMethod,
+          comment: payment.comment
+        }))
+      });
     }
+
+    if (order.statusHistory.length > 0) {
+      await transaction.orderStatusHistory.createMany({
+        data: order.statusHistory.map((item) => ({
+          id: item.id,
+          orderId: order.id,
+          status: item.status,
+          changedAt: new Date(item.changedAt),
+          changedBy: item.changedBy,
+          comment: item.comment
+        }))
+      });
+    }
+
+    return order.id;
   });
-
-  await prisma.specificationLine.deleteMany({ where: { orderId: order.id } });
-  await prisma.payment.deleteMany({ where: { orderId: order.id } });
-  await prisma.orderStatusHistory.deleteMany({ where: { orderId: order.id } });
-
-  if (order.lines.length > 0) {
-    await prisma.specificationLine.createMany({
-      data: order.lines.map((line) => ({
-        id: line.id,
-        orderId: order.id,
-        parentId: line.parentId,
-        lineType: line.lineType,
-        sortOrder: line.sortOrder,
-        title: line.title,
-        description: line.description,
-        heightMm: line.heightMm,
-        widthMm: line.widthMm,
-        quantity: line.quantity,
-        unit: line.unit,
-        pricePerM2: line.pricePerM2,
-        unitAreaM2: line.unitAreaM2,
-        totalAreaM2: line.totalAreaM2,
-        unitPrice: line.unitPrice,
-        totalPrice: line.totalPrice,
-        isCalculated: line.isCalculated,
-        isPrinted: line.isPrinted,
-        metadata:
-          line.metadata == null ? Prisma.JsonNull : (line.metadata as Prisma.InputJsonValue)
-      }))
-    });
-  }
-
-  if (order.payments.length > 0) {
-    await prisma.payment.createMany({
-      data: order.payments.map((payment) => ({
-        id: payment.id,
-        orderId: order.id,
-        paymentType: payment.paymentType,
-        amount: payment.amount,
-        paymentDate: toDate(payment.paymentDate) ?? new Date(),
-        paymentMethod: payment.paymentMethod,
-        comment: payment.comment
-      }))
-    });
-  }
-
-  if (order.statusHistory.length > 0) {
-    await prisma.orderStatusHistory.createMany({
-      data: order.statusHistory.map((item) => ({
-        id: item.id,
-        orderId: order.id,
-        status: item.status,
-        changedAt: new Date(item.changedAt),
-        changedBy: item.changedBy,
-        comment: item.comment
-      }))
-    });
-  }
-
-  return order.id;
 }

@@ -1,5 +1,11 @@
 # Progress log
 
+## Current direction
+
+- Removed the Excel/XML import UI, API and parser from the current product stage.
+- Made JSON file storage the default; PostgreSQL now requires explicit `ORDER_STORE="prisma"` selection.
+- Kept the Prisma schema, migrations and file-to-PostgreSQL sync script for a future controlled migration.
+
 ## 2026-06-11
 
 - Ran the first project-hygiene pass.

@@ -1,11 +1,4 @@
-const insecureBootstrapPins = new Set([
-  "000000",
-  "111111",
-  "123456",
-  "260901",
-  "654321",
-  "999999"
-]);
+import { isValidControlPhrase } from "@/lib/auth-phrase";
 
 const placeholderSecrets = new Set([
   "changeme",
@@ -14,7 +7,7 @@ const placeholderSecrets = new Set([
   "your-secret-here"
 ]);
 
-function readRequiredEnv(name: "AUTH_SECRET" | "AUTH_BOOTSTRAP_PIN") {
+function readRequiredEnv(name: "AUTH_SECRET" | "AUTH_BOOTSTRAP_USERNAME" | "AUTH_BOOTSTRAP_PHRASE") {
   const value = process.env[name]?.trim();
 
   if (!value) {
@@ -38,13 +31,19 @@ function assertValidAuthSecret(secret: string) {
   }
 }
 
-function assertValidBootstrapPin(pin: string) {
-  if (!/^\d{6}$/.test(pin)) {
-    throw new Error("AUTH_BOOTSTRAP_PIN must contain exactly 6 digits.");
+function assertValidBootstrapUsername(username: string) {
+  if (!/^[a-z0-9][a-z0-9._-]{2,29}$/i.test(username)) {
+    throw new Error("AUTH_BOOTSTRAP_USERNAME must contain 3-30 Latin letters, digits, dots, underscores or hyphens.");
+  }
+}
+
+function assertValidBootstrapPhrase(phrase: string) {
+  if (!isValidControlPhrase(phrase)) {
+    throw new Error("AUTH_BOOTSTRAP_PHRASE must contain exactly three words.");
   }
 
-  if (insecureBootstrapPins.has(pin)) {
-    throw new Error("AUTH_BOOTSTRAP_PIN uses an insecure default/common value. Refusing to start.");
+  if (phrase.trim().toLowerCase() === "word-one word-two word-three") {
+    throw new Error("AUTH_BOOTSTRAP_PHRASE uses the example value. Refusing to start.");
   }
 }
 
@@ -56,10 +55,12 @@ export function validateSecurityEnv() {
   }
 
   const authSecret = readRequiredEnv("AUTH_SECRET");
-  const bootstrapPin = readRequiredEnv("AUTH_BOOTSTRAP_PIN");
+  const bootstrapUsername = readRequiredEnv("AUTH_BOOTSTRAP_USERNAME");
+  const bootstrapPhrase = readRequiredEnv("AUTH_BOOTSTRAP_PHRASE");
 
   assertValidAuthSecret(authSecret);
-  assertValidBootstrapPin(bootstrapPin);
+  assertValidBootstrapUsername(bootstrapUsername);
+  assertValidBootstrapPhrase(bootstrapPhrase);
 
   validated = true;
 }
@@ -69,7 +70,12 @@ export function getAuthSecret() {
   return process.env.AUTH_SECRET!.trim();
 }
 
-export function getBootstrapPin() {
+export function getBootstrapUsername() {
   validateSecurityEnv();
-  return process.env.AUTH_BOOTSTRAP_PIN!.trim();
+  return process.env.AUTH_BOOTSTRAP_USERNAME!.trim().toLowerCase();
+}
+
+export function getBootstrapPhrase() {
+  validateSecurityEnv();
+  return process.env.AUTH_BOOTSTRAP_PHRASE!.trim();
 }

@@ -1,5 +1,6 @@
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir } from "node:fs/promises";
 import path from "node:path";
+import { writeJsonFileAtomic } from "@/lib/atomic-json-file";
 import { orders as seedOrders } from "@/lib/mock-data";
 import {
   canUsePrismaOrderStore,
@@ -15,6 +16,11 @@ const ordersDir = path.join(dataDir, "orders");
 function normalizeOrder(order: Order): Order {
   return {
     ...order,
+    lines: Array.isArray(order.lines) ? order.lines : [],
+    payments: Array.isArray(order.payments) ? order.payments : [],
+    statusHistory: Array.isArray(order.statusHistory)
+      ? order.statusHistory
+      : [],
     deliveryRequired: order.deliveryRequired ?? false,
     deliveryAddress: order.deliveryAddress ?? undefined
   };
@@ -93,11 +99,11 @@ export async function saveOrder(order: Order) {
 
   if (await canUsePrismaOrderStore()) {
     await savePrismaOrder(normalizedOrder);
+    return `prisma:${normalizedOrder.id}`;
   }
 
-  await mkdir(ordersDir, { recursive: true });
   const filePath = path.join(ordersDir, `${normalizedOrder.id}.json`);
-  await writeFile(filePath, JSON.stringify(normalizedOrder, null, 2), "utf8");
+  await writeJsonFileAtomic(filePath, normalizedOrder);
   return filePath;
 }
 
@@ -121,9 +127,15 @@ export async function updateOrder(id: string, patch: Partial<Order>) {
       ...currentOrder.customer,
       ...patch.customer
     },
-    category: Object.prototype.hasOwnProperty.call(patch, "category") ? patch.category : currentOrder.category,
-    materialType: Object.prototype.hasOwnProperty.call(patch, "materialType") ? patch.materialType : currentOrder.materialType,
-    millingType: Object.prototype.hasOwnProperty.call(patch, "millingType") ? patch.millingType : currentOrder.millingType,
+    category: Object.prototype.hasOwnProperty.call(patch, "category")
+      ? patch.category
+      : currentOrder.category,
+    materialType: Object.prototype.hasOwnProperty.call(patch, "materialType")
+      ? patch.materialType
+      : currentOrder.materialType,
+    millingType: Object.prototype.hasOwnProperty.call(patch, "millingType")
+      ? patch.millingType
+      : currentOrder.millingType,
     lines: patch.lines ?? currentOrder.lines,
     payments: patch.payments ?? currentOrder.payments,
     statusHistory: patch.statusHistory ?? currentOrder.statusHistory,

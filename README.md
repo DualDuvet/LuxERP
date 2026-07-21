@@ -1,14 +1,16 @@
 # LuxERP specification site
 
-Base infrastructure for digitalizing the Excel/XML order specification.
+File-first application for managing production order specifications.
 
 ## Stack
 
 - Next.js App Router, React and TypeScript
 - Tailwind CSS
-- Prisma ORM with PostgreSQL
+- JSON file storage for orders by default, with an optional PostgreSQL migration path
+- Prisma ORM and PostgreSQL schema for the optional order database mode
+- Better Auth with a separate SQLite database for users and sessions
 - Vitest for calculation tests
-- `fast-xml-parser` and `exceljs` for Excel XML / XLSX import previews
+- `exceljs` for XLSX export templates
 - Playwright reserved for PDF generation and end-to-end checks
 - Docker Compose with PostgreSQL and optional Redis
 
@@ -18,19 +20,22 @@ Base infrastructure for digitalizing the Excel/XML order specification.
 copy .env.example .env
 npm.cmd install
 npm.cmd run prisma:generate
+npm.cmd run prisma:auth:deploy
 npm.cmd run dev
 ```
 
 Open `http://localhost:3000/orders`.
 
-Set `AUTH_SECRET` and `AUTH_BOOTSTRAP_PIN` in `.env` before starting the app.
+Set `AUTH_DATABASE_URL`, `AUTH_SECRET`, `AUTH_BOOTSTRAP_USERNAME`, `AUTH_BOOTSTRAP_PHRASE` and `BETTER_AUTH_URL` in `.env` before starting the app.
+Better Auth stores its data in SQLite using `AUTH_DATABASE_URL`; it does not require PostgreSQL. The default `ORDER_STORE="file"` keeps order data in JSON files.
 
 ## Required auth configuration
 
-The app refuses to start unless both of these values are explicitly set:
+The app refuses to start unless these values are explicitly set:
 
 - `AUTH_SECRET` must be at least 32 characters long and must not use a placeholder value.
-- `AUTH_BOOTSTRAP_PIN` must contain exactly 6 digits and must not use a common/default PIN.
+- `AUTH_BOOTSTRAP_USERNAME` must be a valid local login.
+- `AUTH_BOOTSTRAP_PHRASE` must contain exactly three words.
 
 This check runs during app startup and production build, so unsafe auth defaults cannot slip into deployment.
 
@@ -47,7 +52,9 @@ npm.cmd run test
 npm.cmd run test:routes
 npm.cmd run build
 npm.cmd run start:tunnel
+npm.cmd run prisma:auth:deploy
 npm.cmd run prisma:migrate
+npm.cmd run prisma:deploy
 npm.cmd run prisma:push
 npm.cmd run orders:sync
 docker compose up --build
@@ -55,7 +62,7 @@ docker compose up --build
 
 ## Tests
 
-- `npm.cmd run test` runs all Vitest checks: calculations, import parsing, customer summaries and the API route contract.
+- `npm.cmd run test` runs all Vitest checks: calculations, exports, customer summaries, storage configuration and the API route contract.
 - `npm.cmd run test:routes` verifies that `docs/architecture.md` lists the same API methods and paths that exist under `app/api/**/route.ts`.
 
 ## Public hosting through VDS
@@ -64,25 +71,38 @@ For publishing the local app through a VDS with `WireGuard` and `Caddy`, see [do
 
 For a short practical deployment note covering local production launch, second-PC access, public domain access and current PWA state, see [docs/deployment-short.md](docs/deployment-short.md).
 
-## PostgreSQL mode
+## Storage modes and databases
 
-The app can read/write orders through Prisma when `DATABASE_URL` is set and PostgreSQL is reachable. If the database is unavailable, it falls back to local `.data/orders` files.
+Better Auth always uses the SQLite database configured by `AUTH_DATABASE_URL`. Run `npm.cmd run prisma:auth:deploy` once after installing dependencies; with the local example configuration the database file is `prisma/auth/auth.db`.
+
+The application uses JSON files for orders unless `ORDER_STORE="prisma"` is set explicitly. Merely setting `DATABASE_URL` does not switch storage. Prisma order mode fails when PostgreSQL is unavailable; it never silently writes to a second storage backend.
+
+Current production configuration:
+
+```env
+ORDER_STORE="file"
+AUTH_DATABASE_URL="file:./auth.db"
+```
+
+Planned migration sequence:
 
 ```powershell
-copy .env.example .env
 docker compose up postgres -d
-npm.cmd run prisma:push
+npm.cmd run prisma:deploy
 npm.cmd run orders:sync
-npm.cmd run dev
+# Verify the migrated data, then change ORDER_STORE to "prisma" and restart.
 ```
+
+The sync command copies orders without deleting the source files. Authentication data is managed separately in SQLite.
 
 ## Data and local artifacts
 
 - `.env`, `.env.local`, `.data`, logs, build output and test reports are ignored by git.
 - `.env.example` is intentionally tracked as the setup template.
-- In file mode, orders are stored under `.data/orders`, dictionaries under `.data/dictionaries.json`, users under `.data/users.json`, and import artifacts under `.data/imports`.
+- In file mode, orders are stored under `.data/orders` and dictionaries under `.data/dictionaries.json`.
+- Better Auth users, credential hashes, sessions and rate-limit records are stored in `prisma/auth/auth.db` locally. Docker stores the same database in its persistent `.data` volume.
 - Current local temporary files are marked in [docs/local-artifacts.md](docs/local-artifacts.md).
-- Before publishing the app, set a strong `AUTH_SECRET` and a unique `AUTH_BOOTSTRAP_PIN`.
+- Before publishing the app, set a strong `AUTH_SECRET` and a unique three-word `AUTH_BOOTSTRAP_PHRASE`.
 
 ## Encoding note
 
@@ -96,6 +116,6 @@ If you suspect broken encoding:
 
 ## Current state
 
-The app includes calculation utilities, order list/card/edit/create screens, PIN-based authentication, role-gated user and dictionary management, XML/XLSX import preview and confirmation, editable specification lines, payment management, printable HTML and a Prisma schema matching the documented entities.
+The app includes calculation utilities, order list/card/edit/create screens, Better Auth username authentication, role-gated user and dictionary management, editable specification lines, payment management, printable HTML and Prisma persistence.
 
-Write endpoints are active for orders, order lines, payments, dictionaries, users and import confirmation. The order store uses Prisma/PostgreSQL when `DATABASE_URL` is configured and reachable, and also writes JSON files under `.data/orders` as a fallback/local artifact.
+Write endpoints are active for orders, order lines, payments, dictionaries and users. Better Auth is independent from `ORDER_STORE` and uses SQLite.

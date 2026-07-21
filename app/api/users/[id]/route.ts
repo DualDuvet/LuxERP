@@ -1,16 +1,17 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { readJsonBody } from "@/lib/api-json";
 import { requireApiRole, updateManagedUser, userRoles } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const updateUserSchema = z.object({
+  username: z.string().trim().min(3).max(30).optional(),
   name: z.string().trim().min(1).optional(),
-  email: z.string().trim().email().optional().or(z.literal("")),
   role: z.enum(userRoles).optional(),
   isActive: z.boolean().optional(),
-  pin: z.string().regex(/^\d{6}$/).optional().or(z.literal(""))
+  phrase: z.string().min(8).optional().or(z.literal(""))
 });
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -21,7 +22,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   }
 
   const { id } = await params;
-  const parsed = updateUserSchema.safeParse(await request.json());
+  const body = await readJsonBody(request);
+
+  if (!body.ok) {
+    return NextResponse.json({ error: "Invalid JSON payload" }, { status: 400 });
+  }
+
+  const parsed = updateUserSchema.safeParse(body.data);
 
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid user payload", details: parsed.error.flatten() }, { status: 400 });
@@ -34,8 +41,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   try {
     const user = await updateManagedUser(id, {
       ...parsed.data,
-      email: parsed.data.email || undefined,
-      pin: parsed.data.pin || undefined
+      phrase: parsed.data.phrase || undefined
     });
 
     if (!user) {

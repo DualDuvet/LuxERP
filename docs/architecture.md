@@ -2,7 +2,7 @@
 
 ## Scope
 
-The application follows the supplied Excel/XML digitalization specification and targets an MVP built on Next.js, TypeScript, PostgreSQL, Prisma and Tailwind CSS.
+The application uses Next.js, TypeScript, Tailwind CSS and Prisma. Orders can use JSON files or PostgreSQL; Better Auth uses a separate SQLite database for local users, credentials, sessions and rate limiting.
 
 ## Domain boundaries
 
@@ -11,7 +11,7 @@ The application follows the supplied Excel/XML digitalization specification and 
 - `payments` stores prepayments, final payments, refunds and corrections.
 - `order_status_history` stores production status changes.
 - Dictionary tables store categories, material types, thicknesses, milling types and legal types with soft deactivation.
-- `attachments` and `audit_log` are reserved for imported XML/XLSX files, generated PDFs and traceability.
+- `attachments` and `audit_log` are reserved for future documents, generated PDFs and traceability.
 
 ## MVP screens
 
@@ -19,25 +19,19 @@ The application follows the supplied Excel/XML digitalization specification and 
 - `/orders/[id]` shows the order card with customer data, product parameters, grouped lines and totals.
 - `/orders/new` creates manual orders.
 - `/orders/[id]/edit` edits order fields and specification lines.
-- `/import` previews and confirms Excel XML / XLSX imports.
 - `/dictionaries` manages dictionaries.
-- `/users` manages PIN users for administrators.
+- `/users` manages local users, roles and control phrases for administrators.
 - `/api/orders/[id]/print` returns a printable HTML specification that can later be rendered to PDF through Playwright.
 
 ## API surface
 
-- `POST /api/auth/login`
-- `POST /api/auth/logout`
 - `GET /api/customers`
 - `PATCH /api/customers/:key`
 - `GET /api/dictionaries`
 - `POST /api/dictionaries/:type`
 - `PATCH /api/dictionaries/:type/:id`
 - `DELETE /api/dictionaries/:type/:id`
-- `POST /api/import/specification`
-- `POST /api/import/specification/confirm`
-- `GET /api/import/specification/preview`
-- `POST /api/import/specification/preview`
+- `GET /api/health`
 - `GET /api/orders`
 - `POST /api/orders`
 - `GET /api/orders/:id`
@@ -58,12 +52,14 @@ The application follows the supplied Excel/XML digitalization specification and 
 - `POST /api/users`
 - `PATCH /api/users/:id`
 
-Write endpoints are connected to Zod validation and the hybrid order store. The order store uses Prisma/PostgreSQL when reachable and falls back to JSON files under `.data`.
+Better Auth handles local authentication under `/api/auth`, including username sign-in, session lookup and sign-out.
+
+Write endpoints are connected to Zod validation. PostgreSQL order storage is selected through `ORDER_STORE="prisma"`; authentication remains on SQLite and is not coupled to order storage.
 
 ## Next implementation steps
 
 1. Add a repeatable seed/setup flow for dictionaries and the bootstrap user.
-2. Add smoke/e2e coverage for login, order creation, import preview and edit flows.
-3. Expand import mapping for more historical Excel/XML layout variants.
+2. Add smoke/e2e coverage for login, order creation and edit flows.
+3. Rehearse and document the file-to-PostgreSQL migration on a copy of production data.
 4. Generate PDF from the print route through Playwright.
 5. Add audit records for important order, payment and user changes.

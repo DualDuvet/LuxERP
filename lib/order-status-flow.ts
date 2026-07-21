@@ -39,6 +39,10 @@ const qrStatusTransitions: Record<OrderStatus, readonly QrStatusChoice[]> = {
   cancelled: []
 };
 
+function getStatusHistory(order: Pick<Order, "statusHistory">) {
+  return Array.isArray(order.statusHistory) ? order.statusHistory : [];
+}
+
 function toDateOnly(value: string) {
   return value.slice(0, 10);
 }
@@ -77,7 +81,7 @@ export function appendStatusHistory(
   }
 ) {
   if (nextStatus === order.status) {
-    return order.statusHistory;
+    return getStatusHistory(order);
   }
 
   const changedAt = options?.changedAt ?? new Date().toISOString();
@@ -95,11 +99,11 @@ export function appendStatusHistory(
     comment: options?.comment ?? "Обновление статуса"
   };
 
-  return [...order.statusHistory, item];
+  return [...getStatusHistory(order), item];
 }
 
 export function getLatestStatusHistoryItem(order: Order, status: OrderStatus) {
-  const matches = order.statusHistory.filter((item) => item.status === status);
+  const matches = getStatusHistory(order).filter((item) => item.status === status);
 
   if (matches.length === 0) {
     return undefined;
@@ -119,7 +123,7 @@ export function archiveOrder(
   if (order.status === "cancelled") {
     return {
       status: order.status,
-      statusHistory: order.statusHistory
+      statusHistory: getStatusHistory(order)
     };
   }
 

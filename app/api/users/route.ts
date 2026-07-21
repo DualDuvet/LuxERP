@@ -1,15 +1,16 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { readJsonBody } from "@/lib/api-json";
 import { createManagedUser, listManagedUsers, requireApiRole, userRoles } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const createUserSchema = z.object({
+  username: z.string().trim().min(3).max(30),
   name: z.string().trim().min(1),
-  email: z.string().trim().email().optional().or(z.literal("")),
   role: z.enum(userRoles),
-  pin: z.string().regex(/^\d{6}$/)
+  phrase: z.string().min(8)
 });
 
 export async function GET() {
@@ -29,17 +30,20 @@ export async function POST(request: Request) {
     return auth.response;
   }
 
-  const parsed = createUserSchema.safeParse(await request.json());
+  const body = await readJsonBody(request);
+
+  if (!body.ok) {
+    return NextResponse.json({ error: "Invalid JSON payload" }, { status: 400 });
+  }
+
+  const parsed = createUserSchema.safeParse(body.data);
 
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid user payload", details: parsed.error.flatten() }, { status: 400 });
   }
 
   try {
-    const user = await createManagedUser({
-      ...parsed.data,
-      email: parsed.data.email || undefined
-    });
+    const user = await createManagedUser(parsed.data);
     return NextResponse.json({ data: user }, { status: 201 });
   } catch (error) {
     return NextResponse.json(

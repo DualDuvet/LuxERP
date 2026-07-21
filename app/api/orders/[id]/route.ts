@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { readJsonBody } from "@/lib/api-json";
 import { canManageProduction, requireApiRole, requireApiUser } from "@/lib/auth";
 import {
   archiveOrder,
@@ -128,15 +129,20 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     return NextResponse.json({ error: "Order not found" }, { status: 404 });
   }
 
-  const body = await request.json();
+  const body = await readJsonBody(request);
+
+  if (!body.ok) {
+    return NextResponse.json({ error: "Invalid JSON payload" }, { status: 400 });
+  }
+
   const productionPatchKeys = new Set(["status", "statusAction", "productionStartedAt", "readyAt", "shippedAt"]);
-  const isProductionOnlyPatch = Object.keys(body).every((key) => productionPatchKeys.has(key));
+  const isProductionOnlyPatch = Object.keys(body.data).every((key) => productionPatchKeys.has(key));
 
   if (!["admin", "manager"].includes(auth.user.role) && !(canManageProduction(auth.user.role) && isProductionOnlyPatch)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const parsed = orderPatchSchema.safeParse(body);
+  const parsed = orderPatchSchema.safeParse(body.data);
 
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid order payload", details: parsed.error.flatten() }, { status: 400 });

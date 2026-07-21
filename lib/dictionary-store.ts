@@ -1,8 +1,9 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { writeJsonFileAtomic } from "@/lib/atomic-json-file";
 import {
   dictionaries as seedDictionaries,
   managedDictionaryTypes,
@@ -19,12 +20,16 @@ function cloneSeed(): DictionariesState {
   return structuredClone(seedDictionaries);
 }
 
-function isManagedDictionaryType(value: string): value is ManagedDictionaryType {
+function isManagedDictionaryType(
+  value: string
+): value is ManagedDictionaryType {
   return managedDictionaryTypes.includes(value as ManagedDictionaryType);
 }
 
 function sortItems<T extends DictionaryItem>(items: T[]) {
-  return [...items].sort((first, second) => first.name.localeCompare(second.name, "ru"));
+  return [...items].sort((first, second) =>
+    first.name.localeCompare(second.name, "ru")
+  );
 }
 
 async function readStoredDictionaries() {
@@ -37,8 +42,7 @@ async function readStoredDictionaries() {
 }
 
 async function writeStoredDictionaries(dictionaries: DictionariesState) {
-  await mkdir(dataDir, { recursive: true });
-  await writeFile(dictionariesFile, JSON.stringify(dictionaries, null, 2), "utf8");
+  await writeJsonFileAtomic(dictionariesFile, dictionaries);
 }
 
 export function assertManagedDictionaryType(type: string) {
@@ -63,14 +67,19 @@ export async function listDictionaries(): Promise<DictionariesState> {
     ...merged,
     productCategories: sortItems(merged.productCategories),
     materialTypes: sortItems(merged.materialTypes),
-    thicknesses: [...merged.thicknesses].sort((first, second) => Number(first.name) - Number(second.name)),
+    thicknesses: [...merged.thicknesses].sort(
+      (first, second) => Number(first.name) - Number(second.name)
+    ),
     millingTypes: sortItems(merged.millingTypes),
     legalTypes: sortItems(merged.legalTypes),
     statuses: merged.statuses
   };
 }
 
-export function activeDictionaryItems<T extends DictionaryItem>(items: T[], currentName?: string) {
+export function activeDictionaryItems<T extends DictionaryItem>(
+  items: T[],
+  currentName?: string
+) {
   const activeItems = items.filter((item) => item.isActive);
 
   if (!currentName || activeItems.some((item) => item.name === currentName)) {
@@ -86,10 +95,17 @@ function makeId(type: ManagedDictionaryType) {
 }
 
 function uniqueName(items: DictionaryItem[], name: string, exceptId?: string) {
-  return !items.some((item) => item.id !== exceptId && item.name.trim().toLowerCase() === name.trim().toLowerCase());
+  return !items.some(
+    (item) =>
+      item.id !== exceptId &&
+      item.name.trim().toLowerCase() === name.trim().toLowerCase()
+  );
 }
 
-export async function createDictionaryItem(type: ManagedDictionaryType, payload: Record<string, unknown>) {
+export async function createDictionaryItem(
+  type: ManagedDictionaryType,
+  payload: Record<string, unknown>
+) {
   const dictionaries = await listDictionaries();
 
   if (type === "legalTypes") {
@@ -100,19 +116,34 @@ export async function createDictionaryItem(type: ManagedDictionaryType, payload:
       throw new Error("Code and name are required");
     }
 
-    if (!uniqueName(dictionaries.legalTypes, name) || dictionaries.legalTypes.some((item) => item.code === code)) {
+    if (
+      !uniqueName(dictionaries.legalTypes, name) ||
+      dictionaries.legalTypes.some((item) => item.code === code)
+    ) {
       throw new Error("Dictionary value already exists");
     }
 
-    const item: LegalTypeDictionaryItem = { id: makeId(type), code, name, isActive: true };
+    const item: LegalTypeDictionaryItem = {
+      id: makeId(type),
+      code,
+      name,
+      isActive: true
+    };
     dictionaries.legalTypes = sortItems([...dictionaries.legalTypes, item]);
     await writeStoredDictionaries(dictionaries);
     return item;
   }
 
-  const name = type === "thicknesses" ? String(Number(payload.valueMm ?? payload.name)) : String(payload.name ?? "").trim();
+  const name =
+    type === "thicknesses"
+      ? String(Number(payload.valueMm ?? payload.name))
+      : String(payload.name ?? "").trim();
 
-  if (!name || (type === "thicknesses" && (!Number.isFinite(Number(name)) || Number(name) <= 0))) {
+  if (
+    !name ||
+    (type === "thicknesses" &&
+      (!Number.isFinite(Number(name)) || Number(name) <= 0))
+  ) {
     throw new Error("Dictionary value is required");
   }
 
@@ -132,14 +163,17 @@ export async function updateDictionaryItem(
   payload: Record<string, unknown>
 ) {
   const dictionaries = await listDictionaries();
-  const items = dictionaries[type] as Array<DictionaryItem | LegalTypeDictionaryItem>;
+  const items = dictionaries[type] as Array<
+    DictionaryItem | LegalTypeDictionaryItem
+  >;
   const current = items.find((item) => item.id === id);
 
   if (!current) {
     return null;
   }
 
-  const isActive = typeof payload.isActive === "boolean" ? payload.isActive : current.isActive;
+  const isActive =
+    typeof payload.isActive === "boolean" ? payload.isActive : current.isActive;
 
   if (type === "legalTypes") {
     const currentLegal = current as LegalTypeDictionaryItem;
@@ -151,22 +185,39 @@ export async function updateDictionaryItem(
     }
 
     const duplicate = dictionaries.legalTypes.some(
-      (item) => item.id !== id && (item.code.trim().toLowerCase() === code.toLowerCase() || item.name.trim().toLowerCase() === name.toLowerCase())
+      (item) =>
+        item.id !== id &&
+        (item.code.trim().toLowerCase() === code.toLowerCase() ||
+          item.name.trim().toLowerCase() === name.toLowerCase())
     );
 
     if (duplicate) {
       throw new Error("Dictionary value already exists");
     }
 
-    const nextItem: LegalTypeDictionaryItem = { ...currentLegal, code, name, isActive };
-    dictionaries.legalTypes = sortItems(dictionaries.legalTypes.map((item) => (item.id === id ? nextItem : item)));
+    const nextItem: LegalTypeDictionaryItem = {
+      ...currentLegal,
+      code,
+      name,
+      isActive
+    };
+    dictionaries.legalTypes = sortItems(
+      dictionaries.legalTypes.map((item) => (item.id === id ? nextItem : item))
+    );
     await writeStoredDictionaries(dictionaries);
     return nextItem;
   }
 
-  const name = type === "thicknesses" ? String(Number(payload.valueMm ?? payload.name ?? current.name)) : String(payload.name ?? current.name).trim();
+  const name =
+    type === "thicknesses"
+      ? String(Number(payload.valueMm ?? payload.name ?? current.name))
+      : String(payload.name ?? current.name).trim();
 
-  if (!name || (type === "thicknesses" && (!Number.isFinite(Number(name)) || Number(name) <= 0))) {
+  if (
+    !name ||
+    (type === "thicknesses" &&
+      (!Number.isFinite(Number(name)) || Number(name) <= 0))
+  ) {
     throw new Error("Dictionary value is required");
   }
 
@@ -175,11 +226,16 @@ export async function updateDictionaryItem(
   }
 
   const nextItem: DictionaryItem = { ...current, name, isActive };
-  dictionaries[type] = sortItems(dictionaries[type].map((item) => (item.id === id ? nextItem : item))) as never;
+  dictionaries[type] = sortItems(
+    dictionaries[type].map((item) => (item.id === id ? nextItem : item))
+  ) as never;
   await writeStoredDictionaries(dictionaries);
   return nextItem;
 }
 
-export async function deactivateDictionaryItem(type: ManagedDictionaryType, id: string) {
+export async function deactivateDictionaryItem(
+  type: ManagedDictionaryType,
+  id: string
+) {
   return updateDictionaryItem(type, id, { isActive: false });
 }

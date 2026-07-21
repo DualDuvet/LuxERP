@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { Building2, ClipboardList, LogOut, Settings, UserCog } from "lucide-react";
+import { Building2, ClipboardList, Settings, UserCog } from "lucide-react";
+import { LogoutButton } from "@/components/logout-button";
 import { getRoleLabel } from "@/lib/roles";
 import type { CurrentUser } from "@/lib/auth";
 
@@ -20,11 +21,9 @@ export function PageShell({ children, user }: { children: React.ReactNode; user:
               <p className="text-xs uppercase tracking-wide text-muted">LuxERP</p>
               <h1 className="mt-0.5 text-xl font-semibold text-ink">Спецификации</h1>
             </Link>
-            <form action="/api/auth/logout" method="post" className="xl:hidden">
-              <button className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-line bg-white text-muted transition hover:text-ink" aria-label="Выйти" title="Выйти">
-                <LogOut className="h-4 w-4" />
-              </button>
-            </form>
+            <div className="xl:hidden">
+              <LogoutButton compact />
+            </div>
           </div>
 
           <nav className="grid min-w-0 grid-cols-2 gap-2 sm:flex sm:flex-wrap">
@@ -50,12 +49,7 @@ export function PageShell({ children, user }: { children: React.ReactNode; user:
               <p className="font-medium text-ink">{user.name}</p>
               <p className="text-xs text-muted">{getRoleLabel(user.role)}</p>
             </div>
-            <form action="/api/auth/logout" method="post">
-              <button className="inline-flex items-center gap-2 rounded-md border border-line bg-white px-3 py-2 text-sm text-muted transition hover:text-ink">
-                <LogOut className="h-3.5 w-3.5" />
-                Выйти
-              </button>
-            </form>
+            <LogoutButton />
           </div>
         </div>
       </header>

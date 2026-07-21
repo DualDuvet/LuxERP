@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { readJsonBody } from "@/lib/api-json";
 import { calculateLine, calculateOrderTotals } from "@/lib/calculations";
 import { requireApiRole, requireApiUser } from "@/lib/auth";
 import { getOrderById, updateOrder } from "@/lib/order-store";
@@ -98,7 +99,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     return NextResponse.json({ error: "Order not found" }, { status: 404 });
   }
 
-  const parsed = linePatchSchema.safeParse(await request.json());
+  const body = await readJsonBody(request);
+
+  if (!body.ok) {
+    return NextResponse.json({ error: "Invalid JSON payload" }, { status: 400 });
+  }
+
+  const parsed = linePatchSchema.safeParse(body.data);
 
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid line payload", details: parsed.error.flatten() }, { status: 400 });
@@ -149,7 +156,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: "Order not found" }, { status: 404 });
   }
 
-  const parsed = lineCreateSchema.safeParse(await request.json());
+  const body = await readJsonBody(request);
+
+  if (!body.ok) {
+    return NextResponse.json({ error: "Invalid JSON payload" }, { status: 400 });
+  }
+
+  const parsed = lineCreateSchema.safeParse(body.data);
 
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid line payload", details: parsed.error.flatten() }, { status: 400 });
@@ -200,7 +213,13 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     return NextResponse.json({ error: "Order not found" }, { status: 404 });
   }
 
-  const parsed = lineDeleteSchema.safeParse(await request.json());
+  const body = await readJsonBody(request);
+
+  if (!body.ok) {
+    return NextResponse.json({ error: "Invalid JSON payload" }, { status: 400 });
+  }
+
+  const parsed = lineDeleteSchema.safeParse(body.data);
 
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid line payload", details: parsed.error.flatten() }, { status: 400 });

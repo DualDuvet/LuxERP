@@ -4,21 +4,23 @@ This setup keeps the LuxERP app running on the local machine and publishes it th
 
 `local Next.js app -> WireGuard tunnel -> VDS -> Caddy -> https://luxerp.ru`
 
-It fits this project well because LuxERP can run fully in file mode without PostgreSQL:
+It fits this project well because LuxERP can run in file mode without PostgreSQL. Better Auth uses a local SQLite file:
 
 - set `ORDER_STORE="file"` in `.env`;
-- keep local data in `.data/orders` and `.data/users.json`;
+- keep local data in `.data/orders` and `prisma/auth/auth.db`;
 - expose only the local app on port `3000` to the VDS over WireGuard.
 
 ## 1. Local app preparation
 
 1. Copy `.env.example` to `.env`.
 2. Set a strong `AUTH_SECRET`.
-3. For tunnel-only mode, uncomment `ORDER_STORE="file"`.
+3. Keep `ORDER_STORE="file"` for the current tunnel deployment.
 4. Install dependencies and build:
 
 ```powershell
 npm.cmd install
+npm.cmd run prisma:generate
+npm.cmd run prisma:auth:deploy
 npm.cmd run build
 ```
 
@@ -28,7 +30,7 @@ npm.cmd run build
 npm.cmd run start:tunnel
 ```
 
-The bootstrap admin PIN is `260901` unless overridden through `AUTH_BOOTSTRAP_PIN`.
+Configure the bootstrap admin through `AUTH_BOOTSTRAP_USERNAME` and `AUTH_BOOTSTRAP_PHRASE` in `.env`; never publish the phrase in documentation.
 
 ## 2. DNS
 

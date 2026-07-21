@@ -70,44 +70,44 @@ model Customer {
 }
 
 model Order {
-  id                   String              @id
-  specificationNumber  String              @unique @map("specification_number")
-  documentDate         DateTime            @map("document_date") @db.Date
-  customerId           String              @map("customer_id")
-  customer             Customer            @relation(fields: [customerId], references: [id])
-  customerLegalType    String              @map("customer_legal_type")
-  status               OrderStatus         @default(draft)
-  productionStartedAt  DateTime?           @map("production_started_at") @db.Date
-  readyAt              DateTime?           @map("ready_at") @db.Date
-  shippedAt            DateTime?           @map("shipped_at") @db.Date
-  categoryId           String?             @map("category_id")
-  category             ProductCategory?    @relation(fields: [categoryId], references: [id])
-  materialTypeId       String?             @map("material_type_id")
-  materialType         MaterialType?       @relation(fields: [materialTypeId], references: [id])
-  thicknessMm          Int?                @map("thickness_mm")
-  millingTypeId        String?             @map("milling_type_id")
-  millingType          MillingType?        @relation(fields: [millingTypeId], references: [id])
-  colorCode            String?             @map("color_code")
-  mainNote             String?             @map("main_note")
-  jointingNote         String?             @map("jointing_note")
-  deliveryRequired     Boolean             @default(false) @map("delivery_required")
-  deliveryAddress      String?             @map("delivery_address")
-  totalAreaM2          Decimal             @default(0) @map("total_area_m2") @db.Decimal(12, 4)
-  subtotalAmount       Decimal             @default(0) @map("subtotal_amount") @db.Decimal(12, 2)
-  discountAmount       Decimal             @default(0) @map("discount_amount") @db.Decimal(12, 2)
-  surchargeAmount      Decimal             @default(0) @map("surcharge_amount") @db.Decimal(12, 2)
-  prepaymentAmount     Decimal             @default(0) @map("prepayment_amount") @db.Decimal(12, 2)
-  balanceAmount        Decimal             @default(0) @map("balance_amount") @db.Decimal(12, 2)
-  totalAmount          Decimal             @default(0) @map("total_amount") @db.Decimal(12, 2)
-  createdBy            String?             @map("created_by")
-  updatedBy            String?             @map("updated_by")
-  lines                SpecificationLine[]
-  payments             Payment[]
-  statusHistory        OrderStatusHistory[]
-  attachments          Attachment[]
-  auditLog             AuditLog[]
-  createdAt            DateTime            @default(now()) @map("created_at")
-  updatedAt            DateTime            @updatedAt @map("updated_at")
+  id                  String               @id
+  specificationNumber String               @unique @map("specification_number")
+  documentDate        DateTime             @map("document_date") @db.Date
+  customerId          String               @map("customer_id")
+  customer            Customer             @relation(fields: [customerId], references: [id])
+  customerLegalType   String               @map("customer_legal_type")
+  status              OrderStatus          @default(draft)
+  productionStartedAt DateTime?            @map("production_started_at") @db.Date
+  readyAt             DateTime?            @map("ready_at") @db.Date
+  shippedAt           DateTime?            @map("shipped_at") @db.Date
+  categoryId          String?              @map("category_id")
+  category            ProductCategory?     @relation(fields: [categoryId], references: [id])
+  materialTypeId      String?              @map("material_type_id")
+  materialType        MaterialType?        @relation(fields: [materialTypeId], references: [id])
+  thicknessMm         Int?                 @map("thickness_mm")
+  millingTypeId       String?              @map("milling_type_id")
+  millingType         MillingType?         @relation(fields: [millingTypeId], references: [id])
+  colorCode           String?              @map("color_code")
+  mainNote            String?              @map("main_note")
+  jointingNote        String?              @map("jointing_note")
+  deliveryRequired    Boolean              @default(false) @map("delivery_required")
+  deliveryAddress     String?              @map("delivery_address")
+  totalAreaM2         Decimal              @default(0) @map("total_area_m2") @db.Decimal(12, 4)
+  subtotalAmount      Decimal              @default(0) @map("subtotal_amount") @db.Decimal(12, 2)
+  discountAmount      Decimal              @default(0) @map("discount_amount") @db.Decimal(12, 2)
+  surchargeAmount     Decimal              @default(0) @map("surcharge_amount") @db.Decimal(12, 2)
+  prepaymentAmount    Decimal              @default(0) @map("prepayment_amount") @db.Decimal(12, 2)
+  balanceAmount       Decimal              @default(0) @map("balance_amount") @db.Decimal(12, 2)
+  totalAmount         Decimal              @default(0) @map("total_amount") @db.Decimal(12, 2)
+  createdBy           String?              @map("created_by")
+  updatedBy           String?              @map("updated_by")
+  lines               SpecificationLine[]
+  payments            Payment[]
+  statusHistory       OrderStatusHistory[]
+  attachments         Attachment[]
+  auditLog            AuditLog[]
+  createdAt           DateTime             @default(now()) @map("created_at")
+  updatedAt           DateTime             @updatedAt @map("updated_at")
 
   @@index([documentDate])
   @@index([status])
@@ -115,30 +115,30 @@ model Order {
 }
 
 model SpecificationLine {
-  id            String                @id
-  orderId       String                @map("order_id")
-  order         Order                 @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  parentId      String?               @map("parent_id")
-  parent        SpecificationLine?    @relation("LineTree", fields: [parentId], references: [id])
-  children      SpecificationLine[]   @relation("LineTree")
-  lineType      SpecificationLineType @map("line_type")
-  sortOrder     Int                   @map("sort_order")
-  title         String?
-  description   String?
-  heightMm      Decimal?              @map("height_mm") @db.Decimal(10, 2)
-  widthMm       Decimal?              @map("width_mm") @db.Decimal(10, 2)
-  quantity      Decimal?              @db.Decimal(10, 3)
-  unit          String?
-  pricePerM2    Decimal?              @map("price_per_m2") @db.Decimal(12, 2)
-  unitAreaM2    Decimal?              @map("unit_area_m2") @db.Decimal(12, 6)
-  totalAreaM2   Decimal?              @map("total_area_m2") @db.Decimal(12, 6)
-  unitPrice     Decimal?              @map("unit_price") @db.Decimal(12, 2)
-  totalPrice    Decimal?              @map("total_price") @db.Decimal(12, 2)
-  isCalculated  Boolean               @default(false) @map("is_calculated")
-  isPrinted     Boolean               @default(true) @map("is_printed")
-  metadata      Json?
-  createdAt     DateTime              @default(now()) @map("created_at")
-  updatedAt     DateTime              @updatedAt @map("updated_at")
+  id           String                @id
+  orderId      String                @map("order_id")
+  order        Order                 @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  parentId     String?               @map("parent_id")
+  parent       SpecificationLine?    @relation("LineTree", fields: [parentId], references: [id])
+  children     SpecificationLine[]   @relation("LineTree")
+  lineType     SpecificationLineType @map("line_type")
+  sortOrder    Int                   @map("sort_order")
+  title        String?
+  description  String?
+  heightMm     Decimal?              @map("height_mm") @db.Decimal(10, 2)
+  widthMm      Decimal?              @map("width_mm") @db.Decimal(10, 2)
+  quantity     Decimal?              @db.Decimal(10, 3)
+  unit         String?
+  pricePerM2   Decimal?              @map("price_per_m2") @db.Decimal(12, 2)
+  unitAreaM2   Decimal?              @map("unit_area_m2") @db.Decimal(12, 6)
+  totalAreaM2  Decimal?              @map("total_area_m2") @db.Decimal(12, 6)
+  unitPrice    Decimal?              @map("unit_price") @db.Decimal(12, 2)
+  totalPrice   Decimal?              @map("total_price") @db.Decimal(12, 2)
+  isCalculated Boolean               @default(false) @map("is_calculated")
+  isPrinted    Boolean               @default(true) @map("is_printed")
+  metadata     Json?
+  createdAt    DateTime              @default(now()) @map("created_at")
+  updatedAt    DateTime              @updatedAt @map("updated_at")
 
   @@index([orderId, sortOrder])
   @@index([parentId])
@@ -217,16 +217,78 @@ model LegalType {
 }
 
 model User {
-  id           String   @id
-  email        String   @unique
-  name         String
-  passwordHash String   @map("password_hash")
-  role         UserRole @default(viewer)
-  isActive     Boolean  @default(true) @map("is_active")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  id              String    @id
+  email           String    @unique
+  name            String
+  emailVerified   Boolean   @default(false) @map("email_verified")
+  image           String?
+  username        String?   @unique
+  displayUsername String?   @map("display_username")
+  passwordHash    String?   @map("password_hash")
+  role            UserRole  @default(viewer)
+  isActive        Boolean   @default(true) @map("is_active")
+  sessions        Session[]
+  accounts        Account[]
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
 
   @@map("users")
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime @map("expires_at")
+  token     String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  ipAddress String?  @map("ip_address")
+  userAgent String?  @map("user_agent")
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String    @map("account_id")
+  providerId            String    @map("provider_id")
+  userId                String    @map("user_id")
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?   @map("access_token")
+  refreshToken          String?   @map("refresh_token")
+  idToken               String?   @map("id_token")
+  accessTokenExpiresAt  DateTime? @map("access_token_expires_at")
+  refreshTokenExpiresAt DateTime? @map("refresh_token_expires_at")
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@map("accounts")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime @map("expires_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@index([identifier])
+  @@map("verifications")
+}
+
+model RateLimit {
+  id          String @id
+  key         String @unique
+  count       Int
+  lastRequest BigInt @map("last_request")
+
+  @@map("rate_limits")
 }
 
 model Attachment {

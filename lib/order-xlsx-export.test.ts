@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
+import ExcelJS from "exceljs";
 import { calculateLine, calculateOrderTotals } from "@/lib/calculations";
 import { renderOrderXlsx } from "@/lib/order-xlsx-export";
-import { parseSpreadsheetXlsxBuffer } from "@/lib/xml-import";
 import type { Order, Payment, SpecificationLine } from "@/lib/types";
 
 function makeOrder(): Order {
-  const lines: SpecificationLine[] = [
+  const rawLines: SpecificationLine[] = [
     {
       id: "same-description-a",
       orderId: "order-xlsx-test",
@@ -36,7 +36,8 @@ function makeOrder(): Order {
       isCalculated: true,
       isPrinted: true
     }
-  ].map(calculateLine);
+  ];
+  const lines = rawLines.map(calculateLine);
   const payments: Payment[] = [
     {
       id: "payment-xlsx-test",
@@ -78,17 +79,22 @@ function makeOrder(): Order {
 describe("order xlsx export", () => {
   it("fills a copy of the source workbook template and keeps equal descriptions as separate lines", async () => {
     const order = makeOrder();
-    const preview = await parseSpreadsheetXlsxBuffer(await renderOrderXlsx(order), "export.xlsx");
-    const productLines = preview.lines.filter((line) => line.lineType === "product");
+    const workbook = new ExcelJS.Workbook();
+    const buffer = await renderOrderXlsx(order);
+    await workbook.xlsx.load(
+      buffer as unknown as Parameters<typeof workbook.xlsx.load>[0]
+    );
+    const worksheet = workbook.worksheets[0];
 
-    expect(preview.order.specificationNumber).toBe(order.specificationNumber);
-    expect(preview.order.customerName).toBe(order.customer.name);
-    expect(productLines).toHaveLength(2);
-    expect(productLines.map((line) => line.description)).toEqual([
-      "same visible description",
-      "same visible description"
-    ]);
-    expect(productLines.map((line) => line.heightMm)).toEqual([1930, 520]);
-    expect(preview.lines.map((line) => line.title ?? line.description ?? "").join(" ")).not.toContain("РЕМ.КОМПЛЕКТ");
+    expect(worksheet.getCell("G6").value).toBe(order.specificationNumber);
+    expect(worksheet.getCell("L6").value).toBe(order.customer.name);
+    expect([
+      worksheet.getCell("E18").value,
+      worksheet.getCell("E19").value
+    ]).toEqual(["same visible description", "same visible description"]);
+    expect([
+      worksheet.getCell("B18").value,
+      worksheet.getCell("B19").value
+    ]).toEqual([1930, 520]);
   });
 });

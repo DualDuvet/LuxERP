@@ -23,7 +23,8 @@
 3. Создать `.env` из `.env.example`.
 4. В `.env` заполнить:
    - `AUTH_SECRET`
-   - `AUTH_BOOTSTRAP_PIN`
+   - `AUTH_BOOTSTRAP_USERNAME`
+   - `AUTH_BOOTSTRAP_PHRASE` (exactly three words)
    - `PUBLIC_APP_URL`
 5. Включить:
 
@@ -35,6 +36,8 @@ ORDER_STORE="file"
 
 ```powershell
 npm.cmd install
+npm.cmd run prisma:generate
+npm.cmd run prisma:auth:deploy
 ```
 
 7. Собрать проект:
@@ -60,7 +63,10 @@ copy .env.example .env
 docker compose up -d postgres
 npm.cmd install
 npm.cmd run prisma:generate
-npm.cmd run prisma:push
+npm.cmd run prisma:auth:deploy
+npm.cmd run prisma:deploy
+npm.cmd run orders:sync
+# После проверки перенесённых данных: ORDER_STORE="prisma"
 npm.cmd run build
 npm.cmd run start:tunnel
 ```
@@ -146,7 +152,7 @@ npm.cmd run start:tunnel
    - `npm.cmd run start:tunnel`
 2. Данные регулярно бэкапить из:
    - `.data/orders`
-   - `.data/users.json`
+   - `prisma/auth/auth.db`
    - `.data/dictionaries.json`
 3. Для интернета:
    - WireGuard до VDS
@@ -160,4 +166,3 @@ npm.cmd run start:tunnel
 - добавить мониторинг и резервное копирование БД.
 
 ## 7. Риски и замечания
-

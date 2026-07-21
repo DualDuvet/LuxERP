@@ -1,18 +1,24 @@
 services:
   app:
     build: .
-    depends_on:
-      - postgres
     environment:
-      DATABASE_URL: postgresql://luxerp:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/luxerp?schema=public
+      ORDER_STORE: ${ORDER_STORE:-file}
+      DATABASE_URL: ${DATABASE_URL:-}
+      AUTH_DATABASE_URL: file:/app/.data/auth.db
       AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET in .env}
-      AUTH_BOOTSTRAP_PIN: ${AUTH_BOOTSTRAP_PIN:?Set AUTH_BOOTSTRAP_PIN in .env}
-      AUTH_BOOTSTRAP_EMAIL: ${AUTH_BOOTSTRAP_EMAIL:-admin@luxerp.local}
+      AUTH_BOOTSTRAP_USERNAME: ${AUTH_BOOTSTRAP_USERNAME:?Set AUTH_BOOTSTRAP_USERNAME in .env}
+      AUTH_BOOTSTRAP_PHRASE: ${AUTH_BOOTSTRAP_PHRASE:?Set AUTH_BOOTSTRAP_PHRASE in .env}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3000}
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://localhost:3000}
     ports:
       - "3000:3000"
+    volumes:
+      - luxerp-data:/app/.data
+    command: ["sh", "-c", "npm run prisma:auth:deploy && npm run start"]
 
   postgres:
     image: postgres:16-alpine
+    profiles: ["database"]
     environment:
       POSTGRES_DB: luxerp
       POSTGRES_USER: luxerp
@@ -24,6 +30,8 @@ services:
 
   redis:
     image: redis:7-alpine
+    profiles: ["database"]
 
 volumes:
+  luxerp-data:
   postgres-data:

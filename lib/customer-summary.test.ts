@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { decodeCustomerKey, encodeCustomerKey, getCustomerKey, summarizeCustomers } from "@/lib/customer-summary";
 import type { Customer, Order } from "@/lib/types";
 
-const ipLegalType = "РРџ";
+const ipLegalType = "ИП";
 
 function makeOrder(patch: Partial<Order> & { id: string; customer: Customer }): Order {
   return {

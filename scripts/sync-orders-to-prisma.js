@@ -14,18 +14,34 @@ async function upsertDictionary(type, item) {
     return undefined;
   }
 
-  const data = { id: item.id, name: item.name, isActive: item.isActive ?? true };
+  const data = {
+    id: item.id,
+    name: item.name,
+    isActive: item.isActive ?? true
+  };
 
   if (type === "category") {
-    await prisma.productCategory.upsert({ where: { id: item.id }, update: data, create: data });
+    await prisma.productCategory.upsert({
+      where: { id: item.id },
+      update: data,
+      create: data
+    });
   }
 
   if (type === "material") {
-    await prisma.materialType.upsert({ where: { id: item.id }, update: data, create: data });
+    await prisma.materialType.upsert({
+      where: { id: item.id },
+      update: data,
+      create: data
+    });
   }
 
   if (type === "milling") {
-    await prisma.millingType.upsert({ where: { id: item.id }, update: data, create: data });
+    await prisma.millingType.upsert({
+      where: { id: item.id },
+      update: data,
+      create: data
+    });
   }
 
   return item.id;
@@ -79,6 +95,8 @@ async function saveOrder(order) {
       colorCode: order.colorCode,
       mainNote: order.mainNote,
       jointingNote: order.jointingNote,
+      deliveryRequired: order.deliveryRequired ?? false,
+      deliveryAddress: order.deliveryAddress,
       totalAreaM2: order.totalAreaM2,
       subtotalAmount: order.subtotalAmount,
       discountAmount: order.discountAmount,
@@ -104,6 +122,8 @@ async function saveOrder(order) {
       colorCode: order.colorCode,
       mainNote: order.mainNote,
       jointingNote: order.jointingNote,
+      deliveryRequired: order.deliveryRequired ?? false,
+      deliveryAddress: order.deliveryAddress,
       totalAreaM2: order.totalAreaM2,
       subtotalAmount: order.subtotalAmount,
       discountAmount: order.discountAmount,
@@ -177,12 +197,14 @@ async function main() {
   const jsonFiles = fileNames.filter((fileName) => fileName.endsWith(".json"));
 
   for (const fileName of jsonFiles) {
-    const order = JSON.parse(await fs.readFile(path.join(ordersDir, fileName), "utf8"));
+    const order = JSON.parse(
+      await fs.readFile(path.join(ordersDir, fileName), "utf8")
+    );
     await saveOrder(order);
     console.log(`Synced ${order.specificationNumber} (${order.id})`);
   }
 
-  console.log(`Done. Synced ${jsonFiles.length} order(s).`);
+  console.log(`Done. Synced ${jsonFiles.length} order(s). Auth data stays in the SQLite database.`);
 }
 
 main()
@@ -193,4 +215,3 @@ main()
   .finally(async () => {
     await prisma.$disconnect();
   });
-

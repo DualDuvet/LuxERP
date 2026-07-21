@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { readJsonBody } from "@/lib/api-json";
 import { calculateOrderTotals } from "@/lib/calculations";
 import { requireApiRole, requireApiUser } from "@/lib/auth";
 import { createDictionaryItem, listDictionaries } from "@/lib/dictionary-store";
@@ -91,7 +92,13 @@ export async function POST(request: Request) {
     return auth.response;
   }
 
-  const parsed = orderCreateSchema.safeParse(await request.json());
+  const body = await readJsonBody(request);
+
+  if (!body.ok) {
+    return NextResponse.json({ error: "Invalid JSON payload" }, { status: 400 });
+  }
+
+  const parsed = orderCreateSchema.safeParse(body.data);
 
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid order payload", details: parsed.error.flatten() }, { status: 400 });
