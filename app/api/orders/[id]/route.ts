@@ -11,7 +11,9 @@ import {
   type QrStatusChoice
 } from "@/lib/order-status-flow";
 import { createDictionaryItem, listDictionaries } from "@/lib/dictionary-store";
-import { getOrderById, updateOrder } from "@/lib/order-store";
+import { calculateOrderTotals } from "@/lib/calculations";
+import { normalizeOrderLines, orderLinesInputSchema } from "@/lib/order-form-payload";
+import { getOrderById, listOrders, updateOrder } from "@/lib/order-store";
 import { orderStatuses } from "@/lib/types";
 import type { Order } from "@/lib/types";
 
@@ -48,6 +50,7 @@ const optionalStatusAction = z.preprocess(
 );
 
 const orderPatchSchema = z.object({
+  specificationNumber: z.string().trim().min(1).optional(),
   customerName: z.string().trim().min(1).optional(),
   customerLegalType: z.enum(["ООО", "ИП", "ч/л", "ЗАО"]).optional(),
   status: z.enum(orderStatuses).optional(),
@@ -61,11 +64,14 @@ const orderPatchSchema = z.object({
   millingType: dictionaryPatchSchema.optional().nullable(),
   thicknessMm: optionalNumber,
   colorCode: optionalText,
+  mainNote: optionalText,
   jointingNote: optionalText,
   deliveryRequired: z.boolean().optional(),
   deliveryAddress: optionalText,
   prepaymentAmount: optionalNumber,
-  totalAmount: optionalNumber
+  totalAmount: optionalNumber,
+  clientVersion: optionalText,
+  lines: orderLinesInputSchema.optional()
 });
 
 function makeId(value: string) {
@@ -149,10 +155,39 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   }
 
   const payload = parsed.data;
+
+  if (payload.clientVersion && payload.clientVersion !== order.updatedAt) {
+    return NextResponse.json(
+      { error: "Заказ изменён другим пользователем", code: "VERSION_CONFLICT", data: order },
+      { status: 409 }
+    );
+  }
+
+  if (payload.specificationNumber && payload.specificationNumber !== order.specificationNumber) {
+    const existingOrders = await listOrders();
+    const duplicate = existingOrders.some(
+      (item) =>
+        item.id !== order.id &&
+        item.specificationNumber.trim().toLowerCase() ===
+          payload.specificationNumber?.trim().toLowerCase()
+    );
+
+    if (duplicate) {
+      return NextResponse.json(
+        { error: "Такой номер спецификации уже существует", field: "specificationNumber" },
+        { status: 409 }
+      );
+    }
+  }
+
   await ensureMillingType(payload.millingType?.name);
 
-  const totalAmount = payload.totalAmount ?? order.totalAmount;
-  const prepaymentAmount = payload.prepaymentAmount ?? order.prepaymentAmount;
+  const lines = payload.lines ? normalizeOrderLines(order.id, payload.lines) : order.lines;
+  const totals = calculateOrderTotals(lines, order.payments);
+  const totalAmount = payload.lines ? totals.totalAmount : payload.totalAmount ?? order.totalAmount;
+  const prepaymentAmount = payload.lines
+    ? totals.prepaymentAmount
+    : payload.prepaymentAmount ?? order.prepaymentAmount;
 
   let statusPatch: Pick<Order, "status" | "statusHistory" | "productionStartedAt" | "readyAt" | "shippedAt"> = {
     status: order.status,
@@ -211,6 +246,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   }
 
   const updatedOrder = await updateOrder(order.id, {
+    specificationNumber: payload.specificationNumber ?? order.specificationNumber,
     documentDate: payload.documentDate ?? order.documentDate,
     customerLegalType: payload.customerLegalType ?? order.customerLegalType,
     customer: {
@@ -224,19 +260,20 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     millingType: dictionaryPatch(order.millingType, payload.millingType, "milling"),
     thicknessMm: payload.thicknessMm ?? undefined,
     colorCode: payload.colorCode ?? undefined,
+    mainNote: payload.mainNote ?? undefined,
     jointingNote: payload.jointingNote ?? undefined,
     deliveryRequired: payload.deliveryRequired ?? order.deliveryRequired,
-    deliveryAddress:
-      payload.deliveryRequired === undefined
-        ? order.deliveryRequired
-          ? payload.deliveryAddress ?? order.deliveryAddress
-          : undefined
-        : payload.deliveryRequired
-          ? payload.deliveryAddress ?? order.deliveryAddress
-          : undefined,
+    deliveryAddress: Object.prototype.hasOwnProperty.call(payload, "deliveryAddress")
+      ? payload.deliveryAddress
+      : order.deliveryAddress,
     prepaymentAmount,
+    lines,
+    totalAreaM2: payload.lines ? totals.totalAreaM2 : order.totalAreaM2,
+    subtotalAmount: payload.lines ? totals.subtotalAmount : order.subtotalAmount,
+    discountAmount: payload.lines ? totals.discountAmount : order.discountAmount,
+    surchargeAmount: payload.lines ? totals.surchargeAmount : order.surchargeAmount,
     totalAmount,
-    balanceAmount: totalAmount - prepaymentAmount
+    balanceAmount: payload.lines ? totals.balanceAmount : totalAmount - prepaymentAmount
   });
 
   return NextResponse.json({ data: updatedOrder });

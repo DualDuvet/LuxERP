@@ -24,6 +24,16 @@ textarea {
   font: inherit;
 }
 
+@layer components {
+  .order-input {
+    @apply min-h-10 w-full rounded-md border-line bg-white px-3 py-2 text-sm text-ink shadow-none transition hover:border-muted focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:cursor-not-allowed disabled:bg-panel disabled:text-muted;
+  }
+
+  .order-input[aria-invalid="true"] {
+    @apply border-red-600 focus:border-red-600 focus:ring-red-200;
+  }
+}
+
 @media print {
   body {
     background: white;

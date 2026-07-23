@@ -325,7 +325,8 @@ export async function savePrismaOrder(order: Order) {
         surchargeAmount: order.surchargeAmount,
         prepaymentAmount: order.prepaymentAmount,
         balanceAmount: order.balanceAmount,
-        totalAmount: order.totalAmount
+        totalAmount: order.totalAmount,
+        updatedAt: new Date(order.updatedAt)
       },
       create: {
         id: order.id,
@@ -352,7 +353,9 @@ export async function savePrismaOrder(order: Order) {
         surchargeAmount: order.surchargeAmount,
         prepaymentAmount: order.prepaymentAmount,
         balanceAmount: order.balanceAmount,
-        totalAmount: order.totalAmount
+        totalAmount: order.totalAmount,
+        createdAt: new Date(order.createdAt),
+        updatedAt: new Date(order.updatedAt)
       }
     });
 

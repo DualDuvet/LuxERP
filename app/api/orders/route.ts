@@ -4,6 +4,7 @@ import { readJsonBody } from "@/lib/api-json";
 import { calculateOrderTotals } from "@/lib/calculations";
 import { requireApiRole, requireApiUser } from "@/lib/auth";
 import { createDictionaryItem, listDictionaries } from "@/lib/dictionary-store";
+import { normalizeOrderLines, orderLinesInputSchema } from "@/lib/order-form-payload";
 import { listOrders, saveOrder } from "@/lib/order-store";
 import { orderStatuses } from "@/lib/types";
 import type { Order } from "@/lib/types";
@@ -27,24 +28,38 @@ const emptyStringToUndefined = (value: unknown) => (value === "" || value == nul
 const optionalText = z.preprocess(emptyStringToUndefined, z.string().trim().optional());
 const optionalNumber = z.preprocess(emptyStringToUndefined, z.coerce.number().nonnegative().optional());
 
-const orderCreateSchema = z.object({
-  specificationNumber: z.string().trim().min(1),
-  documentDate: z.string().trim().min(1),
-  customerId: optionalText,
-  customerName: z.string().trim().min(1),
-  customerLegalType: z.enum(legalTypes),
-  status: z.enum(orderStatuses).default("draft"),
-  productionStartedAt: optionalText,
-  readyAt: optionalText,
-  category: z.object({ name: optionalText }).optional(),
-  materialType: z.object({ name: optionalText }).optional(),
-  millingType: z.object({ name: optionalText }).optional(),
-  thicknessMm: optionalNumber,
-  colorCode: optionalText,
-  jointingNote: optionalText,
-  deliveryRequired: z.boolean().default(false),
-  deliveryAddress: optionalText
-});
+const orderCreateSchema = z
+  .object({
+    specificationNumber: z.string().trim().min(1),
+    documentDate: z.string().trim().min(1),
+    customerId: optionalText,
+    customerName: z.string().trim().min(1),
+    customerLegalType: z.enum(legalTypes),
+    status: z.enum(orderStatuses).default("draft"),
+    productionStartedAt: optionalText,
+    readyAt: optionalText,
+    category: z.object({ name: optionalText }).optional(),
+    materialType: z.object({ name: optionalText }).optional(),
+    millingType: z.object({ name: optionalText }).optional(),
+    thicknessMm: optionalNumber,
+    colorCode: optionalText,
+    mainNote: optionalText,
+    jointingNote: optionalText,
+    deliveryRequired: z.boolean().default(false),
+    deliveryAddress: optionalText,
+    lines: orderLinesInputSchema.default([])
+  })
+  .superRefine((order, context) => {
+    if (order.productionStartedAt && order.productionStartedAt < order.documentDate) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["productionStartedAt"], message: "Дата раньше даты оформления" });
+    }
+    if (order.readyAt && order.readyAt < order.documentDate) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["readyAt"], message: "Дата раньше даты оформления" });
+    }
+    if (order.deliveryRequired && !order.deliveryAddress) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["deliveryAddress"], message: "Укажите адрес доставки" });
+    }
+  });
 
 function makeId(value: string) {
   return value
@@ -107,9 +122,25 @@ export async function POST(request: Request) {
   const payload = parsed.data;
   await ensureMillingType(payload.millingType?.name);
 
+  const existingOrders = await listOrders();
+
+  if (
+    existingOrders.some(
+      (order) =>
+        order.specificationNumber.trim().toLowerCase() ===
+        payload.specificationNumber.trim().toLowerCase()
+    )
+  ) {
+    return NextResponse.json(
+      { error: "Такой номер спецификации уже существует", field: "specificationNumber" },
+      { status: 409 }
+    );
+  }
+
   const orderId = `order-${makeId(payload.specificationNumber)}-${Date.now()}`;
   const createdAt = new Date().toISOString();
-  const totals = calculateOrderTotals([], []);
+  const lines = normalizeOrderLines(orderId, payload.lines);
+  const totals = calculateOrderTotals(lines, []);
   const order: Order = {
     id: orderId,
     specificationNumber: payload.specificationNumber,
@@ -129,9 +160,10 @@ export async function POST(request: Request) {
     millingType: dictionaryItem(payload.millingType, "milling"),
     thicknessMm: payload.thicknessMm,
     colorCode: payload.colorCode,
+    mainNote: payload.mainNote,
     jointingNote: payload.jointingNote,
     deliveryRequired: payload.deliveryRequired,
-    deliveryAddress: payload.deliveryRequired ? payload.deliveryAddress : undefined,
+    deliveryAddress: payload.deliveryAddress,
     totalAreaM2: totals.totalAreaM2,
     subtotalAmount: totals.subtotalAmount,
     discountAmount: totals.discountAmount,
@@ -139,7 +171,7 @@ export async function POST(request: Request) {
     prepaymentAmount: totals.prepaymentAmount,
     balanceAmount: totals.balanceAmount,
     totalAmount: totals.totalAmount,
-    lines: [],
+    lines,
     payments: [],
     statusHistory: [
       {
