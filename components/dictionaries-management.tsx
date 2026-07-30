@@ -92,9 +92,6 @@ export function DictionariesManagement({
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-semibold text-ink">Справочники</h1>
-        <p className="mt-1 text-sm text-muted">
-          Категории, материалы, толщины, фрезеровки и типы лиц. Удаление мягкое: значение становится неактивным.
-        </p>
       </div>
 
       {error ? (

@@ -13,7 +13,6 @@ export function SpecificationLinesTable({ lines }: { lines: SpecificationLine[] 
     <section className="rounded-md border border-line bg-white shadow-soft">
       <div className="border-b border-line px-4 py-3">
         <h3 className="font-semibold text-ink">Табличная часть</h3>
-        <p className="text-sm text-muted">Строки спецификации без ручного редактирования.</p>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[980px] text-sm">
