@@ -1,5 +1,4 @@
 import { formatArea } from "@/lib/calculations";
-import { orderStatusQrDataUrl } from "@/lib/order-qr";
 import { linesWithUnifiedMillingNotes, specificationLineText } from "@/lib/specification-line-display";
 import type { Order, SpecificationLine } from "@/lib/types";
 
@@ -61,6 +60,15 @@ function numberValue(value: number | undefined, precision = 2) {
   }).format(value);
 }
 
+function dateValue(value: string | undefined) {
+  if (!value) {
+    return "";
+  }
+
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  return match ? `${match[3]}/${match[2]}/${match[1].slice(-2)}` : value;
+}
+
 function statusLabel(status: Order["status"]) {
   const labels: Record<Order["status"], string> = {
     draft: "Черновик",
@@ -86,8 +94,8 @@ function customerContacts(order: Order) {
     .map((value) => textValue(value));
 }
 
-function renderLineRows(order: Order) {
-  return linesWithUnifiedMillingNotes(order.lines.filter((line) => line.isPrinted))
+function renderLineRows(lines: SpecificationLine[]) {
+  return lines
     .map((line) => {
       const description = visibleText(line);
 
@@ -120,7 +128,7 @@ function renderLineRows(order: Order) {
         ${cell(numberValue(line.widthMm, 0), "num")}
         ${cell(numberValue(line.quantity, 3), "num")}
         <td colspan="5">${htmlEscape(description)}</td>
-        ${cell(money(line.pricePerM2 ?? line.unitPrice), "num")}
+        ${cell(money(line.pricePerM2 ?? line.unitPrice), "num price-cell")}
         ${cell(numberValue(line.unitAreaM2, 6), "num")}
         ${cell(numberValue(line.totalAreaM2, 6), "num")}
         ${cell(money(line.unitPrice), "num")}
@@ -154,7 +162,8 @@ function renderCustomerFooter(order: Order) {
 }
 
 export async function renderPrintHtml(order: Order) {
-  const qrDataUrl = await orderStatusQrDataUrl(order.id);
+  const visibleLines = linesWithUnifiedMillingNotes(order.lines.filter((line) => line.isPrinted));
+  const quantityTotal = visibleLines.reduce((total, line) => total + (line.quantity ?? 0), 0);
 
   return `<!doctype html>
 <html lang="ru">
@@ -162,35 +171,39 @@ export async function renderPrintHtml(order: Order) {
     <meta charset="utf-8" />
     <title>Спецификация ${htmlEscape(order.specificationNumber)}</title>
     <style>
-      @page { size: A4 portrait; margin: 8mm; }
+      @page { size: A4 portrait; margin: 7mm; }
       * { box-sizing: border-box; }
-      body { margin: 0; background: #f3f4f6; color: #000; font-family: Calibri, Arial, sans-serif; }
-      table { width: 100%; max-width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 8.6px; line-height: 1.18; }
+      html { background: #fff; }
+      body { margin: 0; background: #fff; color: #000; font-family: Calibri, Arial, sans-serif; }
+      table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 8.2px; line-height: 1.12; }
       td, th { border: 1px solid #000; padding: 2px 3px; height: 17px; vertical-align: middle; overflow-wrap: anywhere; word-break: normal; }
-      th { background: #f1f1f1; font-size: 8px; font-weight: 700; text-align: center; }
-      .sheet { width: 194mm; min-height: 281mm; margin: 0 auto; background: #fff; padding: 2.5mm; overflow: hidden; }
+      th { background: #d9d9d9; font-size: 8px; font-weight: 700; text-align: center; }
+      .sheet { width: 196mm; min-height: 283mm; margin: 0 auto; background: #fff; padding: 1.5mm; overflow: hidden; }
       .blank { border: 0; }
-      .logo img { max-width: 100%; max-height: 68px; object-fit: contain; }
-      .qr-cell { text-align: center; vertical-align: top; padding: 4px; }
-      .qr-cell img { width: 70px; height: 70px; display: block; margin: 0 auto 3px; }
-      .qr-label { font-size: 7.5px; line-height: 1.2; color: #333; }
-      .label { background: #f7f7f7; color: #333; font-size: 7.5px; text-align: center; }
-      .section { background: #e8f2f1; font-weight: 700; text-align: center; text-transform: uppercase; }
-      .title { font-size: 12px; font-weight: 700; text-align: center; }
-      .value { font-weight: 700; font-size: 9px; }
+      .logo-row td { height: 13px; }
+      .logo { border: 0; padding: 0 8px 3px 2px; text-align: left; vertical-align: middle; }
+      .logo img { display: block; width: 100%; max-width: 360px; max-height: 58px; object-fit: contain; object-position: left center; filter: grayscale(1); }
+      .label { border: 0; color: #333; font-size: 7.2px; text-align: center; }
+      .section { border: 0; font-weight: 700; text-align: right; text-transform: uppercase; }
+      .title { border: 0; font-size: 13px; font-weight: 700; text-align: right; white-space: nowrap; }
+      .value { background: #e7e7e7; font-weight: 700; font-size: 9px; }
       .num { text-align: right; white-space: nowrap; }
       .center { text-align: center; }
       .total-cell { font-weight: 700; }
-      .group-row td { background: #dcebea; font-weight: 700; }
-      .empty-row td { height: 17px; }
+      .price-cell { background: #ededed; font-weight: 700; }
+      .group-row td { background: #dedede; font-weight: 700; text-align: center; }
+      .empty-row td { height: 17px; background: #c9c9c9; }
       .note-row td { color: #333; font-style: italic; }
-      .warning { font-size: 9.2px; font-weight: 700; line-height: 1.25; text-align: center; }
-      .sign td { height: 34px; border-top: 0; font-size: 9px; }
-      .footer-details { padding: 0; }
-      .footer-layout { display: grid; grid-template-columns: 1.05fr 1.25fr; min-height: 118px; }
+      .quantity-total { background: #e0e0e0; font-size: 10px; font-weight: 700; text-align: center; }
+      .warning-row td { border: 0; height: 54px; }
+      .warning { font-size: 8.5px; font-weight: 700; line-height: 1.28; text-align: center; }
+      .sign td { height: 32px; border: 0; border-bottom: 1px solid transparent; font-family: "Times New Roman", serif; font-size: 9px; }
+      .signature-name { font-size: 11px !important; font-weight: 700; text-align: center; }
+      .footer-details { padding: 0; border: 0; }
+      .footer-layout { display: grid; grid-template-columns: 1.05fr 1.25fr; min-height: 96px; }
       .footer-company,
       .footer-customer { padding: 6px 6px 7px; }
-      .footer-company { border-right: 1px solid #000; font-size: 7.8px; line-height: 1.24; }
+      .footer-company { border-right: 0; font-size: 7.8px; line-height: 1.24; }
       .footer-company-grid { display: grid; grid-template-columns: 1fr 1fr; column-gap: 10px; row-gap: 2px; }
       .footer-customer { display: grid; grid-template-columns: 1fr; align-items: center; gap: 8px; }
       .footer-customer-with-delivery { grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); }
@@ -198,11 +211,11 @@ export async function renderPrintHtml(order: Order) {
       .customer-label { font-size: 9px; font-weight: 700; text-transform: uppercase; color: #3f3f46; }
       .customer-name { font-size: 14px; font-weight: 700; line-height: 1.2; }
       .customer-contact { font-size: 10px; line-height: 1.3; }
-      .delivery-box { display: flex; min-height: 84px; flex-direction: column; align-items: center; justify-content: center; padding: 8px 10px; text-align: center; color: #22a447; }
-      .delivery-title { font-size: 24px; font-weight: 700; letter-spacing: 0.6px; line-height: 1.05; }
+      .delivery-box { display: flex; min-height: 76px; flex-direction: column; align-items: center; justify-content: center; border: 2px solid #555; padding: 8px 10px; text-align: center; color: #000; }
+      .delivery-title { font-size: 22px; font-weight: 700; letter-spacing: 0; line-height: 1.05; }
       .delivery-address { margin-top: 8px; font-size: 14px; font-weight: 500; line-height: 1.28; }
       @media print {
-        body { background: #fff; }
+        * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         .sheet { width: auto; min-height: auto; margin: 0; padding: 0; transform: none; }
       }
     </style>
@@ -227,20 +240,16 @@ export async function renderPrintHtml(order: Order) {
           <col style="width: 8%" />
         </colgroup>
         <tbody>
-          <tr>
+          <tr class="logo-row">
             <td colspan="8" rowspan="5" class="logo">
-              <img src="/print-logo.png" alt="Логотип" />
+              <img src="/print-logo-bw.png" alt="Логотип" />
             </td>
-            <td colspan="3" rowspan="5" class="qr-cell">
-              <img src="${qrDataUrl}" alt="QR-код статуса заказа" />
-              <div class="qr-label">Сканируйте для смены статуса заказа</div>
-            </td>
-            <td colspan="3" class="blank"></td>
+            <td colspan="6" class="blank"></td>
           </tr>
-          <tr><td colspan="3" class="blank"></td></tr>
-          <tr><td colspan="3" class="blank"></td></tr>
-          <tr><td colspan="3" class="blank"></td></tr>
-          <tr><td colspan="3" class="blank"></td></tr>
+          <tr class="logo-row"><td colspan="6" class="blank"></td></tr>
+          <tr class="logo-row"><td colspan="6" class="blank"></td></tr>
+          <tr class="logo-row"><td colspan="6" class="blank"></td></tr>
+          <tr class="logo-row"><td colspan="6" class="blank"></td></tr>
 
           <tr>
             <td class="blank"></td>
@@ -249,7 +258,7 @@ export async function renderPrintHtml(order: Order) {
             <td colspan="3" class="title">Спецификация №</td>
             <td class="value center">${htmlEscape(order.specificationNumber)}</td>
             <td class="center">от</td>
-            <td class="value center">${htmlEscape(order.documentDate)}</td>
+            <td class="value center">${htmlEscape(dateValue(order.documentDate))}</td>
             <td class="blank"></td>
             <td class="value center">${textValue(order.customerLegalType)}</td>
             <td colspan="3" class="value center">${textValue(order.customer.name)}</td>
@@ -269,33 +278,32 @@ export async function renderPrintHtml(order: Order) {
             <td class="blank"></td>
             <td class="blank"></td>
             <td class="blank"></td>
-            <td colspan="7" class="blank"></td>
-            <td class="blank"></td>
+            <td colspan="8" class="blank"></td>
             <td colspan="2" class="section">${htmlEscape(statusLabel(order.status))}</td>
-            <td class="value center">${htmlEscape(order.productionStartedAt ?? "")}</td>
+            <td class="value center">${htmlEscape(dateValue(order.productionStartedAt))}</td>
           </tr>
           <tr>
             <td colspan="11" class="blank"></td>
             <td colspan="2" class="section">Дата готовности</td>
-            <td class="value center">${htmlEscape(order.readyAt ?? "")}</td>
+            <td class="value center">${htmlEscape(dateValue(order.readyAt))}</td>
           </tr>
           <tr>
             <td class="blank"></td>
             <td colspan="2" class="value center">${textValue(order.category?.name ?? "")}</td>
             <td colspan="2" class="value center">${textValue(order.materialType?.name ?? "")}</td>
             <td class="value center">${htmlEscape(String(order.thicknessMm ?? ""))}</td>
-            <td colspan="3" class="value center">${textValue(order.colorCode ?? "")}</td>
+            <td colspan="3" class="value center">${textValue(order.millingType?.name ?? "")}</td>
             <td class="blank"></td>
             <td class="blank"></td>
             <td colspan="2" class="section">Дата отгрузки</td>
-            <td class="value center">${htmlEscape(order.shippedAt ?? "")}</td>
+            <td class="value center">${htmlEscape(dateValue(order.shippedAt))}</td>
           </tr>
           <tr>
             <td class="blank"></td>
             <td colspan="2" class="label">категория</td>
             <td colspan="2" class="label">тип</td>
             <td class="label">толщина</td>
-            <td colspan="3" class="label">Примечание</td>
+            <td colspan="3" class="label">фрезеровка</td>
             <td class="blank"></td>
             <td class="blank"></td>
             <td colspan="2" class="section">остаток</td>
@@ -343,15 +351,26 @@ export async function renderPrintHtml(order: Order) {
             <th>1 ед</th>
             <th>общая</th>
           </tr>
-          ${renderLineRows(order)}
+          ${renderLineRows(visibleLines)}
           <tr>
-            <td colspan="14" class="warning">
-              ПРОВЕРЯЙТЕ ПРАВИЛЬНОСТЬ ВНЕСЕННЫХ ДАННЫХ В СПЕЦИФИКАЦИИ. ПРЕТЕНЗИИ ПОСЛЕ ОПЛАТЫ ИЛИ ПОДТВЕРЖДЕНИЯ НЕ ПРИНИМАЮТСЯ.
+            <td colspan="3" class="blank"></td>
+            <td class="quantity-total">${numberValue(quantityTotal, 3)}</td>
+            <td colspan="9" class="blank"></td>
+            <td class="center">-</td>
+          </tr>
+          <tr class="warning-row">
+            <td colspan="8" class="blank"></td>
+            <td colspan="6" class="warning">
+              ПРОВЕРЯЙТЕ ПРАВИЛЬНОСТЬ ВНЕСЕННЫХ ДАННЫХ В СПЕЦИФИКАЦИИ<br />
+              ПРЕТЕНЗИИ ПОСЛЕ ОПЛАТЫ ИЛИ ПОДТВЕРЖДЕНИЯ НЕ ПРИНИМАЮТСЯ
             </td>
           </tr>
           <tr class="sign">
-            <td colspan="7">Исполнитель: __________________________</td>
-            <td colspan="7">Заказчик: __________________________</td>
+            <td colspan="2" class="blank"></td>
+            <td colspan="4">Исполнитель ____________________</td>
+            <td colspan="2" class="blank"></td>
+            <td colspan="4">Заказчик ____________________</td>
+            <td colspan="2" class="signature-name">${textValue(order.customer.name)}</td>
           </tr>
           <tr>
             <td colspan="14" class="footer-details">

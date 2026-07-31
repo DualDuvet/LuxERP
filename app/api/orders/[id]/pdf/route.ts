@@ -23,8 +23,8 @@ function renderPdfHtml(order: Order) {
 
   return htmlPromise.then((html) => {
     try {
-      const logo = readFileSync(join(process.cwd(), "public", "print-logo.png")).toString("base64");
-      return html.replaceAll('src="/print-logo.png"', `src="data:image/png;base64,${logo}"`);
+      const logo = readFileSync(join(process.cwd(), "public", "print-logo-bw.png")).toString("base64");
+      return html.replaceAll('src="/print-logo-bw.png"', `src="data:image/png;base64,${logo}"`);
     } catch {
       return html;
     }

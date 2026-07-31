@@ -96,5 +96,12 @@ describe("order xlsx export", () => {
       worksheet.getCell("B18").value,
       worksheet.getCell("B19").value
     ]).toEqual([1930, 520]);
+    expect(worksheet.getCell("D33").value).toBe(2);
+    expect(worksheet.getCell("E34").value).toBeNull();
+    expect(worksheet.getCell("N16").value).toBe(order.subtotalAmount);
+    expect(worksheet.getCell("G6").fill).toMatchObject({
+      type: "pattern",
+      fgColor: { argb: expect.stringMatching(/^FF([0-9A-F]{2})\1\1$/) }
+    });
   });
 });

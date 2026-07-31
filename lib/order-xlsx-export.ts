@@ -4,9 +4,10 @@ import ExcelJS from "exceljs";
 import { linesWithUnifiedMillingNotes, specificationLineText } from "@/lib/specification-line-display";
 import type { Order, SpecificationLine } from "@/lib/types";
 
-const defaultTemplatePath = path.join(process.cwd(), "docs", "124,05.xlsx");
+const defaultTemplatePath = path.join(process.cwd(), "docs", "283,04.xlsx");
+const monochromeLogoPath = path.join(process.cwd(), "public", "print-logo-bw.png");
 const firstLineRow = 18;
-const lastTemplateLineRow = 25;
+const lastTemplateLineRow = 32;
 
 function text(value: unknown) {
   return String(value ?? "");
@@ -29,7 +30,7 @@ function asDate(value: string | undefined) {
 }
 
 function numberOrBlank(value: number | undefined) {
-  return value ?? "";
+  return value ?? null;
 }
 
 function statusText(status: Order["status"]) {
@@ -81,9 +82,9 @@ function writeHeader(worksheet: ExcelJS.Worksheet, order: Order) {
   worksheet.getCell("L6").value = text(order.customer.name);
 
   worksheet.getCell("L8").value = statusText(order.status);
-  worksheet.getCell("N8").value = asDate(order.productionStartedAt) ?? "";
-  worksheet.getCell("N9").value = asDate(order.readyAt) ?? "";
-  worksheet.getCell("N10").value = asDate(order.shippedAt) ?? "";
+  worksheet.getCell("N8").value = asDate(order.productionStartedAt) ?? null;
+  worksheet.getCell("N9").value = asDate(order.readyAt) ?? null;
+  worksheet.getCell("N10").value = asDate(order.shippedAt) ?? null;
 
   worksheet.getCell("B10").value = text(order.category?.name);
   worksheet.getCell("D10").value = text(order.materialType?.name);
@@ -95,7 +96,77 @@ function writeHeader(worksheet: ExcelJS.Worksheet, order: Order) {
   worksheet.getCell("N13").value = order.prepaymentAmount;
   worksheet.getCell("K15").value = order.totalAreaM2;
   worksheet.getCell("N15").value = order.totalAmount;
+  worksheet.getCell("N16").value = order.subtotalAmount;
   worksheet.getCell("D15").value = text(order.jointingNote);
+}
+
+function grayscaleColor(argb: string | undefined, fallback = "FF000000") {
+  if (!argb || argb.length < 6) {
+    return fallback;
+  }
+
+  const hex = argb.length === 8 ? argb.slice(2) : argb.slice(-6);
+  const red = Number.parseInt(hex.slice(0, 2), 16);
+  const green = Number.parseInt(hex.slice(2, 4), 16);
+  const blue = Number.parseInt(hex.slice(4, 6), 16);
+
+  if ([red, green, blue].some((channel) => Number.isNaN(channel))) {
+    return fallback;
+  }
+
+  const luminance = Math.round(0.299 * red + 0.587 * green + 0.114 * blue);
+  const channel = Math.max(0, Math.min(255, luminance));
+  return `FF${channel.toString(16).padStart(2, "0").repeat(3).toUpperCase()}`;
+}
+
+function normalizePrintColors(worksheet: ExcelJS.Worksheet, toRow: number) {
+  for (let rowNumber = 1; rowNumber <= toRow; rowNumber += 1) {
+    const row = worksheet.getRow(rowNumber);
+
+    for (let columnNumber = 1; columnNumber <= 14; columnNumber += 1) {
+      const cell = row.getCell(columnNumber);
+      const fillColor = cell.fill?.type === "pattern" ? cell.fill.fgColor?.argb : undefined;
+
+      if (fillColor) {
+        cell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: grayscaleColor(fillColor, "FFFFFFFF") }
+        };
+      }
+
+      cell.font = { ...cell.font, color: { argb: "FF000000" } };
+    }
+  }
+
+}
+
+function removeStaticRepairKit(worksheet: ExcelJS.Worksheet) {
+  worksheet.eachRow((row) => {
+    row.eachCell((cell) => {
+      if (text(cell.value).trim().toUpperCase() === "+ РЕМ.КОМПЛЕКТ") {
+        cell.value = null;
+      }
+    });
+  });
+}
+
+async function replaceTemplateLogo(workbook: ExcelJS.Workbook, worksheet: ExcelJS.Worksheet) {
+  const logo = await readFile(monochromeLogoPath);
+
+  for (const image of worksheet.getImages()) {
+    const imageId = Number(image.imageId);
+
+    if (!Number.isFinite(imageId)) {
+      continue;
+    }
+
+    const media = workbook.getImage(imageId);
+    media.buffer = undefined;
+    media.base64 = `data:image/png;base64,${logo.toString("base64")}`;
+    media.filename = undefined;
+    media.extension = "png";
+  }
 }
 
 function writeDictionaryValues(worksheet: ExcelJS.Worksheet | undefined, order: Order) {
@@ -130,7 +201,7 @@ function writeLine(worksheet: ExcelJS.Worksheet, rowNumber: number, line: Specif
   if (line.lineType === "group") {
     worksheet.getCell(rowNumber, 5).value = visibleText(line);
     row.eachCell((cell) => {
-      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE8F2F1" } };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE7E7E7" } };
       cell.font = { ...cell.font, bold: true };
     });
     return;
@@ -141,7 +212,7 @@ function writeLine(worksheet: ExcelJS.Worksheet, rowNumber: number, line: Specif
   worksheet.getCell(rowNumber, 2).value = numberOrBlank(isService ? undefined : line.heightMm);
   worksheet.getCell(rowNumber, 3).value = numberOrBlank(isService ? undefined : line.widthMm);
   worksheet.getCell(rowNumber, 4).value = numberOrBlank(line.quantity);
-  worksheet.getCell(rowNumber, 5).value = visibleText(line);
+  worksheet.getCell(rowNumber, 5).value = visibleText(line) || null;
   worksheet.getCell(rowNumber, 10).value = numberOrBlank(isService ? undefined : line.pricePerM2);
   worksheet.getCell(rowNumber, 11).value = numberOrBlank(line.unitAreaM2);
   worksheet.getCell(rowNumber, 12).value = numberOrBlank(line.totalAreaM2);
@@ -175,6 +246,24 @@ export async function renderOrderXlsx(order: Order, templatePath = defaultTempla
   visibleLines.forEach((line, index) => {
     writeLine(specificationSheet, firstLineRow + index, line);
   });
+
+  const extraLineCount = Math.max(0, visibleLines.length - (lastTemplateLineRow - firstLineRow + 1));
+  const totalRow = lastTemplateLineRow + extraLineCount + 1;
+  clearCellValues(specificationSheet, totalRow, totalRow, 2, 14);
+  specificationSheet.getCell(`D${totalRow}`).value = visibleLines.reduce(
+    (total, line) => total + (line.quantity ?? 0),
+    0
+  );
+  specificationSheet.getCell(`N${totalRow}`).value = "-";
+  specificationSheet.getCell(`K15`).value = order.totalAreaM2;
+  specificationSheet.getCell(`N15`).value = order.totalAmount;
+  specificationSheet.getCell(`N16`).value = order.subtotalAmount;
+  specificationSheet.getCell(`N12`).value = order.balanceAmount;
+  specificationSheet.getCell(`N13`).value = order.prepaymentAmount;
+  removeStaticRepairKit(specificationSheet);
+  normalizePrintColors(specificationSheet, 48 + extraLineCount);
+  specificationSheet.removeConditionalFormatting(undefined);
+  await replaceTemplateLogo(workbook, specificationSheet);
 
   writeDictionaryValues(findTemplateSheet(workbook, "лист1", 1), order);
 
