@@ -2,20 +2,39 @@
 setlocal
 pushd "%~dp0\..\.."
 
-for /f "usebackq delims=" %%I in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "(Get-Date).ToString('yyyy-MM-dd_HH-mm-ss')"`) do set "STAMP=%%I"
-set "BACKUP_DIR=backups\luxerp-%STAMP%"
+rem Separate multiple backup destinations with semicolons.
+set "BACKUP_ROOTS=backups"
 
-echo [LuxERP] Creating backup in %BACKUP_DIR%...
+for /f "usebackq delims=" %%I in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "(Get-Date).ToString('yyyy-MM-dd_HH-mm-ss')"`) do set "STAMP=%%I"
+echo [LuxERP] Creating backup in: %BACKUP_ROOTS%...
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$ErrorActionPreference = 'Stop';" ^
-  "New-Item -ItemType Directory -Force -Path '%BACKUP_DIR%' | Out-Null;" ^
-  "if (Test-Path '.data') { Copy-Item -LiteralPath '.data' -Destination '%BACKUP_DIR%\.data' -Recurse -Force };" ^
-  "if (Test-Path '.env') { Copy-Item -LiteralPath '.env' -Destination '%BACKUP_DIR%\.env' -Force }"
+  "$roots = '%BACKUP_ROOTS%'.Split(';') | ForEach-Object { $_.Trim() } | Where-Object { $_ };" ^
+  "$stamp = '%STAMP%';" ^
+  "$paths = @('.data\orders', '.data\dictionaries.json', 'prisma\auth\auth.db', '.env');" ^
+  "$copied = 0;" ^
+  "foreach ($root in $roots) {" ^
+  "  $backupDir = Join-Path $root ('luxerp-' + $stamp);" ^
+  "  New-Item -ItemType Directory -Force -Path $backupDir | Out-Null;" ^
+  "  Write-Host ('[LuxERP] Destination: ' + $backupDir);" ^
+  "  foreach ($path in $paths) {" ^
+  "    if (Test-Path -LiteralPath $path) {" ^
+  "      $destination = Join-Path $backupDir $path;" ^
+  "      $parent = Split-Path -Parent $destination;" ^
+  "      New-Item -ItemType Directory -Force -Path $parent | Out-Null;" ^
+  "      Copy-Item -LiteralPath $path -Destination $destination -Recurse -Force;" ^
+  "      Write-Host ('[LuxERP] Copied: ' + $path);" ^
+  "      $copied++;" ^
+  "    } else { Write-Host ('[LuxERP] Skipped missing path: ' + $path) }" ^
+  "  }" ^
+  "}" ^
+  "if ($roots.Count -eq 0) { throw 'No backup destinations were configured.' };" ^
+  "if ($copied -eq 0) { throw 'No backup source paths were found.' }"
 
 if errorlevel 1 goto :error
 
-echo [LuxERP] Backup complete: %BACKUP_DIR%
+echo [LuxERP] Backup complete in all configured destinations.
 popd
 exit /b 0
 

@@ -15,6 +15,7 @@ type ManagedUser = {
 };
 
 const userGridColumns = "grid-cols-[1fr_1.15fr_0.9fr_0.6fr_1.35fr_0.55fr]";
+const visibleUserRoles = userRoles.filter((role) => role !== "accountant");
 
 export function UsersManagement({
   users,
@@ -92,7 +93,7 @@ export function UsersManagement({
           <label className="space-y-1">
             <span className="text-xs text-muted">Роль</span>
             <select name="role" defaultValue="viewer" className="w-full rounded-md border-line text-sm">
-              {userRoles.map((role) => (
+              {visibleUserRoles.map((role) => (
                 <option key={role} value={role}>
                   {getRoleLabel(role)}
                 </option>
@@ -131,13 +132,17 @@ export function UsersManagement({
             >
               <input name="username" defaultValue={user.username} className="min-w-0 rounded-md border-line text-sm" pattern="[A-Za-z0-9][A-Za-z0-9._-]{2,29}" required />
               <input name="name" defaultValue={user.name} className="min-w-0 rounded-md border-line text-sm" required />
-              <select name="role" defaultValue={user.role} className="min-w-0 rounded-md border-line text-sm">
-                {userRoles.map((role) => (
-                  <option key={role} value={role}>
-                    {getRoleLabel(role as UserRole)}
-                  </option>
-                ))}
-              </select>
+              {user.role === "accountant" ? (
+                <input type="hidden" name="role" value={user.role} />
+              ) : (
+                <select name="role" defaultValue={user.role} className="min-w-0 rounded-md border-line text-sm">
+                  {visibleUserRoles.map((role) => (
+                    <option key={role} value={role}>
+                      {getRoleLabel(role as UserRole)}
+                    </option>
+                  ))}
+                </select>
+              )}
               <label className="inline-flex min-w-0 items-center gap-2">
                 {user.id === currentUserId ? <input type="hidden" name="isActive" value="on" /> : null}
                 <input
